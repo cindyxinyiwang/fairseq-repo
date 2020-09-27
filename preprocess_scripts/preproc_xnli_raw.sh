@@ -17,34 +17,36 @@ DICT=pretrained_models/xlmr/xlmr.base/dict.txt
 #  spm_encode --model=$MODEL --output_format=piece < $file > $f
 #done
 
-for LAN in ar bg de el en es fr hi ru sw th tr ur vi zh; do
+for LAN in ar; do
   for type in input0 input1; do
     fairseq-preprocess \
       --only-source \
       --dataset-impl 'raw' \
-      --trainpref xnli/data/xnli.train."$type".spm."$LAN" \
-      --validpref xnli/data/xnli.dev."$type".spm."$LAN" \
-      --testpref xnli/data/xnli.test."$type".spm."$LAN" \
+      --trainpref xnli/data/xnli.train."$type"."$LAN" \
+      --validpref xnli/data/xnli.dev."$type"."$LAN" \
+      --testpref xnli/data/xnli.test."$type"."$LAN" \
       --destdir data-bin/xnli_raw/"$LAN"/"$type" \
       --workers 32 
   done
 done
 
-fairseq-preprocess \
-  --only-source \
-  --trainpref xnli/data/xnli.train.label.ar \
-  --validpref xnli/data/xnli.dev.label.ar \
-  --testpref xnli/data/xnli.test.label.ar \
-  --destdir data-bin/xnli_raw/ar/label \
-  --workers 32
+#fairseq-preprocess \
+#  --only-source \
+#  --dataset-impl 'raw' \
+#  --trainpref xnli/data/xnli.train.label.ar \
+#  --validpref xnli/data/xnli.dev.label.ar \
+#  --testpref xnli/data/xnli.test.label.ar \
+#  --destdir data-bin/xnli_raw/ar/label \
+#  --workers 32
 
-for LAN in bg de el en es fr hi ru sw th tr ur vi zh; do
-  fairseq-preprocess \
-  --only-source \
-  --trainpref xnli/data/xnli.train.label."$LAN" \
-  --validpref xnli/data/xnli.dev.label."$LAN" \
-  --testpref xnli/data/xnli.test.label."$LAN" \
-  --destdir data-bin/xnli/"$LAN"/label \
-  --srcdict data-bin/xnli_raw/ar/label/dict.txt \
-  --workers 32
-done
+#for LAN in bg de el en es fr hi ru sw th tr ur vi zh; do
+#  fairseq-preprocess \
+#  --only-source \
+#  --dataset-impl 'raw' \
+#  --trainpref xnli/data/xnli.train.label."$LAN" \
+#  --validpref xnli/data/xnli.dev.label."$LAN" \
+#  --testpref xnli/data/xnli.test.label."$LAN" \
+#  --destdir data-bin/xnli/"$LAN"/label \
+#  --srcdict data-bin/xnli_raw/ar/label/dict.txt \
+#  --workers 32
+#done

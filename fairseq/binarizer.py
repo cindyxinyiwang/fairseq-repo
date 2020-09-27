@@ -9,6 +9,7 @@ from collections import Counter
 from fairseq.tokenizer import tokenize_line
 import torch
 from fairseq.file_io import PathManager
+from fairseq.data import data_utils
 
 def safe_readline(f):
     pos = f.tell()
@@ -32,6 +33,8 @@ class Binarizer:
         offset=0,
         end=-1,
         already_numberized=False,
+        char_ngram=False,
+        max_char_size=50,
     ):
         nseq, ntok = 0, 0
         replaced = Counter()
@@ -56,14 +59,25 @@ class Binarizer:
                         id_list.append(dict.eos())
                     ids = torch.IntTensor(id_list)
                 else:
-                    ids = dict.encode_line(
-                        line=line,
-                        line_tokenizer=tokenize,
-                        add_if_not_exist=False,
-                        consumer=replaced_consumer,
-                        append_eos=append_eos,
-                        reverse_order=reverse_order,
-                    )
+                    if char_ngram:
+                        ids = []
+                        for w in line.split():
+                            # max_char_len
+                            char_ngram = data_utils.word_to_ngram(w, dict, max_char_size)
+                            ids.append(char_ngram)
+                        if append_eos:
+                            char_ngram = [dict.eos()] + [dict.pad()]*(max_char_size-1)
+                            ids.append(char_ngram)
+                        ids = torch.LongTensor(ids)
+                    else:
+                        ids = dict.encode_line(
+                            line=line,
+                            line_tokenizer=tokenize,
+                            add_if_not_exist=False,
+                            consumer=replaced_consumer,
+                            append_eos=append_eos,
+                            reverse_order=reverse_order,
+                        )
                 nseq += 1
                 ntok += len(ids)
                 consumer(ids)

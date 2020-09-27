@@ -64,6 +64,7 @@ def main(args):
             threshold=args.thresholdsrc if src else args.thresholdtgt,
             nwords=args.nwordssrc if src else args.nwordstgt,
             padding_factor=args.padding_factor,
+            char_ngram=args.char_ngram,
         )
 
     target = not args.only_source
@@ -146,7 +147,7 @@ def main(args):
         merge_result(
             Binarizer.binarize(
                 input_file, vocab, lambda t: ds.add_item(t),
-                offset=0, end=offsets[1]
+                offset=0, end=offsets[1], char_ngram=args.char_ngram, max_char_size=args.max_char_size,
             )
         )
         if num_workers > 1:
@@ -315,7 +316,7 @@ def binarize(args, filename, vocab, output_prefix, lang, offset, end, append_eos
         ds.add_item(tensor)
 
     res = Binarizer.binarize(filename, vocab, consumer, append_eos=append_eos,
-                             offset=offset, end=end)
+                             offset=offset, end=end, char_ngram=args.char_ngram, max_char_size=args.max_char_size)
     ds.finalize(dataset_dest_file(args, output_prefix, lang, "idx"))
     return res
 

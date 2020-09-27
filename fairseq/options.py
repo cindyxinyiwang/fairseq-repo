@@ -299,6 +299,10 @@ def add_preprocess_args(parser):
                        help="Pad dictionary size to be multiple of N")
     group.add_argument("--workers", metavar="N", default=1, type=int,
                        help="number of parallel workers")
+    group.add_argument("--char-ngram", action="store_true",
+                       help="binarize into character ngrams")
+    group.add_argument("--max-char-size", metavar="N", default=50, type=int,
+                       help="max character size")
     # fmt: on
     return parser
 
@@ -667,5 +671,13 @@ def add_model_args(parser):
     group.add_argument('--arch', '-a', metavar='ARCH',
                        choices=ARCH_MODEL_REGISTRY.keys(),
                        help='model architecture')
+    # args for SDE
+    group.add_argument('--use-sde-embed', action='store_true',
+                        help='Use SDE embedding')
+    group.add_argument('--sde-latent', type=int, metavar='D', default=0,
+                        help='SDE latent embedding size')
+    group.add_argument('--max-char-len', type=int, metavar='D', default=50,
+                        help='Maximum char ngrams in a word')
+
     # fmt: on
     return group
