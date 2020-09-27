@@ -11,9 +11,10 @@ from . import BaseWrapperDataset
 
 class PrependTokenDataset(BaseWrapperDataset):
 
-    def __init__(self, dataset, token=None):
+    def __init__(self, dataset, token=None, pad_token=None):
         super().__init__(dataset)
         self.token = token
+        self.pad_token = pad_token
         if token is not None:
             self._sizes = np.array(dataset.sizes) + 1
         else:
@@ -22,7 +23,12 @@ class PrependTokenDataset(BaseWrapperDataset):
     def __getitem__(self, idx):
         item = self.dataset[idx]
         if self.token is not None:
-            item = torch.cat([item.new([self.token]), item])
+            if self.pad_token is not None:
+                # char ngram data
+                item_len = item.size(1)
+                item = torch.cat([item.new([[self.token] + [self.pad_token]*(item_len-1)]), item])
+            else:
+                item = torch.cat([item.new([self.token]), item])
         return item
 
     @property

@@ -3,10 +3,11 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from .sde_embedding import SDE, SDENoWeight
 from .adaptive_input import AdaptiveInput
 from .adaptive_softmax import AdaptiveSoftmax
 from .beamable_mm import BeamableMM
-from .character_token_embedder import CharacterTokenEmbedder
+from .character_token_embedder import CharacterTokenEmbedder, CharacterNgramEmbedder
 from .conv_tbc import ConvTBC
 from .cross_entropy import cross_entropy
 from .downsampled_multihead_attention import DownsampledMultiHeadAttention
@@ -36,10 +37,13 @@ from .transformer_layer import TransformerDecoderLayer, TransformerEncoderLayer
 from .vggblock import VGGBlock
 
 __all__ = [
+    'SDE',
+    'SDENoWeight',
     'AdaptiveInput',
     'AdaptiveSoftmax',
     'BeamableMM',
     'CharacterTokenEmbedder',
+    'CharacterNgramEmbedder',
     'ConvTBC',
     'cross_entropy',
     'DownsampledMultiHeadAttention',

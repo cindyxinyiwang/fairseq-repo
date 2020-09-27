@@ -16,6 +16,7 @@ from .backtranslation_dataset import BacktranslationDataset
 from .bucket_pad_length_dataset import BucketPadLengthDataset
 from .colorize_dataset import ColorizeDataset
 from .concat_dataset import ConcatDataset
+from .simple_concat_dataset import SimpleConcatDataset
 from .concat_sentences_dataset import ConcatSentencesDataset
 from .denoising_dataset import DenoisingDataset
 from .id_dataset import IdDataset
@@ -66,6 +67,7 @@ __all__ = [
     'BucketPadLengthDataset',
     'ColorizeDataset',
     'ConcatDataset',
+    'SimpleConcatDataset',
     'ConcatSentencesDataset',
     'CountingIterator',
     'DenoisingDataset',

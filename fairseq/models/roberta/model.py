@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fairseq import utils
+from fairseq import checkpoint_utils
 from fairseq.models import (
     FairseqEncoder,
     FairseqEncoderModel,
@@ -98,6 +99,9 @@ class RobertaModel(FairseqEncoderModel):
                             help='scalar quantization noise and scalar quantization at training time')
         parser.add_argument('--untie-weights-roberta', action='store_true',
                             help='Untie weights between embeddings and classifiers in RoBERTa')
+        
+        parser.add_argument('--pretrained_sde_path', type=str, default=None,
+                            help='Path to the pretrained sde.')
 
     @classmethod
     def build_model(cls, args, task):
@@ -112,11 +116,25 @@ class RobertaModel(FairseqEncoderModel):
         encoder = RobertaEncoder(args, task.source_dictionary)
         return cls(args, encoder)
 
-    def forward(self, src_tokens, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
+    def load_state_dict(self, state_dict, strict=True, args=None):
+        """Copies parameters and buffers from *state_dict* into this module and
+        its descendants.
+
+        Overrides the method in :class:`nn.Module`. Compared with that method
+        this additionally "upgrades" *state_dicts* from old checkpoints.
+        """
+        if self.args.pretrained_sde_path is not None:
+            sde_model = checkpoint_utils.load_checkpoint_to_cpu(self.args.pretrained_sde_path)['model']
+        else:
+            sde_model = None
+        self.upgrade_state_dict_named(state_dict, "", pretrained_sde_state_dict=sde_model)
+        #new_state_dict = prune_state_dict(state_dict, args)
+        return super().load_state_dict(state_dict, strict=False)
+
+    def forward(self, src_tokens, subword_src_tokens=None, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
         if classification_head_name is not None:
             features_only = True
-
-        x, extra = self.encoder(src_tokens, features_only, return_all_hiddens, **kwargs)
+        x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
 
         if classification_head_name is not None:
             x = self.classification_heads[classification_head_name](x)
@@ -142,8 +160,12 @@ class RobertaModel(FairseqEncoderModel):
                         name, num_classes, prev_num_classes, inner_dim, prev_inner_dim
                     )
                 )
+        if self.args.use_sde_embed:
+            emb_dim = self.args.encoder_embed_dim*2
+        else:
+            emb_dim = self.args.encoder_embed_dim
         self.classification_heads[name] = RobertaClassificationHead(
-            self.args.encoder_embed_dim,
+            emb_dim,
             inner_dim or self.args.encoder_embed_dim,
             num_classes,
             self.args.pooler_activation_fn,
@@ -170,7 +192,7 @@ class RobertaModel(FairseqEncoderModel):
         )
         return RobertaHubInterface(x['args'], x['task'], x['models'][0])
 
-    def upgrade_state_dict_named(self, state_dict, name):
+    def upgrade_state_dict_named(self, state_dict, name, pretrained_sde_state_dict=None):
         prefix = name + '.' if name != '' else ''
 
         # rename decoder -> encoder before upgrading children modules
@@ -228,6 +250,19 @@ class RobertaModel(FairseqEncoderModel):
                     logger.info('Overwriting ' + prefix + 'classification_heads.' + k)
                     state_dict[prefix + 'classification_heads.' + k] = v
 
+        # Create new embedding
+        if pretrained_sde_state_dict is not None:
+            keys_to_delete = []
+            for k in state_dict.keys():
+                if "lm_head" in k or "embed_tokens" in k:
+                    keys_to_delete.append(k)
+            print(keys_to_delete)
+            for k in keys_to_delete:
+                del state_dict[k]
+            for k in pretrained_sde_state_dict.keys():
+                if k.startswith("emb_train"):
+                    new_key = ".".join(["encoder", "embed_tokens"]+k.split(".")[1:])
+                    state_dict[new_key] = pretrained_sde_state_dict[k]
 
 class RobertaLMHead(nn.Module):
     """Head for masked language modeling."""
@@ -290,8 +325,10 @@ class RobertaEncoder(FairseqEncoder):
             args.encoder_layers = len(args.encoder_layers_to_keep.split(","))
 
         self.sentence_encoder = TransformerSentenceEncoder(
+            args=args,
             padding_idx=dictionary.pad(),
             vocab_size=len(dictionary),
+            vocab=dictionary,
             num_encoder_layers=args.encoder_layers,
             embedding_dim=args.encoder_embed_dim,
             ffn_embedding_dim=args.encoder_ffn_embed_dim,
@@ -310,18 +347,19 @@ class RobertaEncoder(FairseqEncoder):
         )
         args.untie_weights_roberta = getattr(args, 'untie_weights_roberta', False)
 
-        self.lm_head = RobertaLMHead(
-            embed_dim=args.encoder_embed_dim,
-            output_dim=len(dictionary),
-            activation_fn=args.activation_fn,
-            weight=(
-                self.sentence_encoder.embed_tokens.weight
-                if not args.untie_weights_roberta
-                else None
-            ),
-        )
+        if not self.args.use_sde_embed:
+          self.lm_head = RobertaLMHead(
+              embed_dim=args.encoder_embed_dim,
+              output_dim=len(dictionary),
+              activation_fn=args.activation_fn,
+              weight=(
+                  self.sentence_encoder.embed_tokens.weight
+                  if not args.untie_weights_roberta
+                  else None
+              ),
+          )
 
-    def forward(self, src_tokens, features_only=False, return_all_hiddens=False, masked_tokens=None, **unused):
+    def forward(self, src_tokens, subword_src_tokens=None, features_only=False, return_all_hiddens=False, masked_tokens=None, **unused):
         """
         Args:
             src_tokens (LongTensor): input tokens of shape `(batch, src_len)`
@@ -338,14 +376,15 @@ class RobertaEncoder(FairseqEncoder):
                   is a list of hidden states. Note that the hidden
                   states have shape `(src_len, batch, vocab)`.
         """
-        x, extra = self.extract_features(src_tokens, return_all_hiddens=return_all_hiddens)
+        x, extra = self.extract_features(src_tokens, subword_src_tokens, return_all_hiddens=return_all_hiddens)
         if not features_only:
             x = self.output_layer(x, masked_tokens=masked_tokens)
         return x, extra
 
-    def extract_features(self, src_tokens, return_all_hiddens=False, **unused):
+    def extract_features(self, src_tokens, subword_src_tokens=None, return_all_hiddens=False, **unused):
         inner_states, _ = self.sentence_encoder(
             src_tokens,
+            subword_src_tokens,
             last_state_only=not return_all_hiddens,
         )
         features = inner_states[-1].transpose(0, 1)  # T x B x C -> B x T x C

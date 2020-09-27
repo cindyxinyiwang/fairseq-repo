@@ -18,6 +18,97 @@ CHAR_EOS_IDX = 257
 
 logger = logging.getLogger(__name__)
 
+class CharacterNgramEmbedder(torch.nn.Module):
+    def __init__(
+            self,
+            vocab: Dictionary,
+            char_embed_dim: int,
+            word_embed_dim: int,
+            highway_layers: int,
+            max_char_len: int = 50,
+            char_inputs: bool = True,
+            char_emb: nn.Embedding = None,
+    ):
+        super(CharacterNgramEmbedder, self).__init__()
+
+        self.onnx_trace = False
+        self.embedding_dim = word_embed_dim
+        self.max_char_len = max_char_len
+        if char_emb is not None:
+            self.char_embeddings = char_emb
+        else:
+            self.char_embeddings = nn.Embedding(len(vocab), char_embed_dim, padding_idx=vocab.pad())
+        self.char_inputs = char_inputs
+
+        last_dim = char_embed_dim
+
+        self.highway = Highway(last_dim, highway_layers) if highway_layers > 0 else None
+
+        if char_embed_dim != word_embed_dim:
+            self.projection = nn.Linear(last_dim, word_embed_dim)
+        else:
+            self.projection = None
+
+        assert vocab is not None or char_inputs, "vocab must be set if not using char inputs"
+        self.vocab = vocab 
+
+        #self.reset_parameters()
+
+    def prepare_for_onnx_export_(self):
+        self.onnx_trace = True
+
+    @property
+    def padding_idx(self):
+        return Dictionary().pad() if self.vocab is None else self.vocab.pad()
+
+    def reset_parameters(self):
+        #nn.init.xavier_normal_(self.char_embeddings.weight)
+        #nn.init.xavier_normal_(self.symbol_embeddings)
+
+        nn.init.constant_(self.char_embeddings.weight[self.char_embeddings.padding_idx], 0.)
+        if self.projection is not None:
+            nn.init.xavier_uniform_(self.projection.weight)
+            nn.init.constant_(self.projection.bias, 0.)
+
+    def forward(
+            self,
+            input: torch.Tensor,
+    ):
+        chars = input.view(-1, self.max_char_len)
+        pads = chars[:, 0].eq(self.vocab.pad())
+        eos = chars[:, 0].eq(self.vocab.eos())
+        unk = None
+
+        word_embs = self._ave(chars)
+        if pads.any():
+            word_embs[pads] = self.char_embeddings.weight[self.vocab.pad()]
+        if eos.any():
+            word_embs[eos] = self.char_embeddings.weight[self.vocab.eos()]
+        if unk is not None and unk.any():
+            word_embs[unk] = self.char_embeddings.weight[self.vocab.unk()]
+
+        return word_embs.view(input.size()[:2] + (-1,))
+
+    def _ave(
+            self,
+            char_idxs: torch.Tensor,
+    ):
+        # BTC
+        char_embs = self.char_embeddings(char_idxs)
+        # BC
+        x = char_embs.sum(dim=1)
+        non_pad_mask = 1-char_idxs.eq(self.vocab.pad()).int()
+        char_counts = torch.clamp(non_pad_mask.sum(dim=-1), min=1)
+        x = x/char_counts.unsqueeze(-1)
+
+        if self.highway is not None:
+            x = self.highway(x)
+        if self.projection is not None:
+            x = self.projection(x)
+
+        return x
+
+
 
 class CharacterTokenEmbedder(torch.nn.Module):
     def __init__(

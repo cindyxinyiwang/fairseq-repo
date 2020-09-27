@@ -21,6 +21,30 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+def word_to_ngram(word, vocab, max_char_len):
+    """Get char ngram indices of a word. vocab: dictionary of character ngrams """
+    idx = []
+    for i in range(len(word)):
+        #for n in range(1, 4):
+        #for j in range(i+n, len(word), n):
+        for j in range(i+1, len(word)+1):
+            char_idx = vocab.index(word[i:j])
+            #print(char, vocab.index(char))
+            if char_idx != vocab.unk():
+              idx.append(char_idx)
+            # account for bpe pieces
+            char_idx = vocab.index( "▁" + word[i:j])
+            if char_idx != vocab.unk():
+              idx.append(char_idx)
+    if len(idx)==0:
+        print("unk word:", word)
+        idx = [vocab.unk()] + [vocab.pad()]*(max_char_len-1)
+    if len(idx) > max_char_len:
+        idx = idx[:max_char_len]
+    else:
+        idx = idx + [vocab.pad()]*(max_char_len-len(idx))
+    return idx
+
 
 def infer_language_pair(path):
     """Infer language pair from filename: <split>.<lang1>-<lang2>.(...).idx"""
@@ -55,7 +79,7 @@ def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_be
     return res
 
 
-def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False, default='cached'):
+def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False, default='cached', args=None, char_ngram=False):
     """A helper function for loading indexed datasets.
 
     Args:
@@ -85,6 +109,9 @@ def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False
             impl=dataset_impl_k or default,
             fix_lua_indexing=True,
             dictionary=dictionary,
+            args=args,
+            max_char_size=args.max_char_len,
+            char_ngram=char_ngram,
         )
         if dataset is None:
             break

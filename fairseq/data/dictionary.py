@@ -26,6 +26,7 @@ class Dictionary(object):
         eos="</s>",
         unk="<unk>",
         extra_special_symbols=None,
+        char_ngram=False
     ):
         self.unk_word, self.pad_word, self.eos_word = unk, pad, eos
         self.symbols = []
@@ -39,6 +40,7 @@ class Dictionary(object):
             for s in extra_special_symbols:
                 self.add_symbol(s)
         self.nspecial = len(self.symbols)
+        self.char_ngram = char_ngram
 
     def __eq__(self, other):
         return self.indices == other.indices
@@ -201,7 +203,7 @@ class Dictionary(object):
         return self.unk_index
 
     @classmethod
-    def load(cls, f):
+    def load(cls, f, char_ngram=False):
         """Loads the dictionary from a text file with the format:
 
         ```
@@ -210,7 +212,7 @@ class Dictionary(object):
         ...
         ```
         """
-        d = cls()
+        d = cls(char_ngram=char_ngram)
         d.add_from_file(f)
         return d
 
@@ -319,7 +321,7 @@ class Dictionary(object):
 
     @staticmethod
     def _add_file_to_dictionary_single_worker(
-        filename, tokenize, eos_word, worker_id=0, num_workers=1
+        filename, tokenize, eos_word, worker_id=0, num_workers=1, char_ngram=False
     ):
         counter = Counter()
         with open(PathManager.get_local_path(filename), "r", encoding="utf-8") as f:
@@ -333,7 +335,15 @@ class Dictionary(object):
             line = f.readline()
             while line:
                 for word in tokenize(line):
-                    counter.update([word])
+                    if char_ngram:
+                        chars = []
+                        for i in range(len(word)):
+                            for n in range(1, 4):
+                                for j in range(i+n, len(word), n):
+                                    chars.append(word[i:j])
+                        counter.update(chars)
+                    else:
+                        counter.update([word])
                 counter.update([eos_word])
                 if f.tell() > end:
                     break
@@ -341,7 +351,7 @@ class Dictionary(object):
         return counter
 
     @staticmethod
-    def add_file_to_dictionary(filename, dict, tokenize, num_workers):
+    def add_file_to_dictionary(filename, dict, tokenize, num_workers, char_ngram=False):
         def merge_result(counter):
             for w, c in sorted(counter.items()):
                 dict.add_symbol(w, c)
@@ -353,7 +363,7 @@ class Dictionary(object):
                 results.append(
                     pool.apply_async(
                         Dictionary._add_file_to_dictionary_single_worker,
-                        (filename, tokenize, dict.eos_word, worker_id, num_workers),
+                        (filename, tokenize, dict.eos_word, worker_id, num_workers, char_ngram),
                     )
                 )
             pool.close()

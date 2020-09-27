@@ -53,7 +53,7 @@ class FairseqTask(object):
 
     @classmethod
     def build_dictionary(
-        cls, filenames, workers=1, threshold=-1, nwords=-1, padding_factor=8
+        cls, filenames, workers=1, threshold=-1, nwords=-1, padding_factor=8, char_ngram=False,
     ):
         """Build the dictionary
 
@@ -66,11 +66,12 @@ class FairseqTask(object):
             padding_factor (int): can be used to pad the dictionary size to be a
                 multiple of 8, which is important on some hardware (e.g., Nvidia
                 Tensor Cores).
+            char_ngram (bool): whether to use char_ngram as vocab units. 
         """
-        d = Dictionary()
+        d = Dictionary(char_ngram=char_ngram)
         for filename in filenames:
             Dictionary.add_file_to_dictionary(
-                filename, d, tokenizer.tokenize_line, workers
+                filename, d, tokenizer.tokenize_line, workers,
             )
         d.finalize(threshold=threshold, nwords=nwords, padding_factor=padding_factor)
         return d

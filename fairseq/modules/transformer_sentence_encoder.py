@@ -14,6 +14,7 @@ from fairseq.modules import (
     MultiheadAttention,
     PositionalEmbedding,
     TransformerSentenceEncoderLayer,
+    SDE,
 )
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 
@@ -72,8 +73,10 @@ class TransformerSentenceEncoder(nn.Module):
 
     def __init__(
         self,
+        args,
         padding_idx: int,
         vocab_size: int,
+        vocab,
         num_encoder_layers: int = 6,
         embedding_dim: int = 768,
         ffn_embedding_dim: int = 3072,
@@ -100,8 +103,10 @@ class TransformerSentenceEncoder(nn.Module):
     ) -> None:
 
         super().__init__()
+        self.args = args
         self.padding_idx = padding_idx
         self.vocab_size = vocab_size
+        self.vocab = vocab
         self.dropout_module = FairseqDropout(dropout, module_name=self.__class__.__name__)
         self.layerdrop = layerdrop
         self.max_seq_len = max_seq_len
@@ -113,9 +118,11 @@ class TransformerSentenceEncoder(nn.Module):
         self.traceable = traceable
         self.tpu = False  # whether we're on TPU
 
-        self.embed_tokens = self.build_embedding(
-            self.vocab_size, self.embedding_dim, self.padding_idx
+        self.embed_tokens = nn.Embedding(
+            self.vocab_size, self.embedding_dim, self.padding_idx,
         )
+        if self.args.use_sde_embed:
+            self.sde_embed_tokens = SDE(self.vocab, dim=embedding_dim, char_emb=self.embed_tokens, latent=self.args.sde_latent)
         self.embed_scale = embed_scale
 
         if q_noise > 0:
@@ -187,9 +194,6 @@ class TransformerSentenceEncoder(nn.Module):
         for layer in range(n_trans_layers_to_freeze):
             freeze_module_params(self.layers[layer])
 
-    def build_embedding(self, vocab_size, embedding_dim, padding_idx):
-        return nn.Embedding(vocab_size, embedding_dim, padding_idx)
-
     def build_transformer_sentence_encoder_layer(
         self,
         embedding_dim,
@@ -222,17 +226,39 @@ class TransformerSentenceEncoder(nn.Module):
     def forward(
         self,
         tokens: torch.Tensor,
+        subword_src_tokens: torch.Tensor = None,
         segment_labels: torch.Tensor = None,
         last_state_only: bool = False,
         positions: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.args.use_sde_embed:
+            sde_states, sde_sent_rep = self._forward(tokens, segment_labels, last_state_only, positions, use_sde_embed=True)
+            #return sde_states, sde_sent_rep
+            states, sent_rep = self._forward(subword_src_tokens, segment_labels, last_state_only, positions)
+            return [torch.cat([sde_sent_rep.unsqueeze(0), sent_rep.unsqueeze(0)], dim=-1) ], (0.5*sde_sent_rep+sent_rep)/1.5
+        else:
+            return self._forward(tokens, segment_labels, last_state_only, positions)
+
+    def _forward(
+        self,
+        tokens: torch.Tensor,
+        segment_labels: torch.Tensor = None,
+        last_state_only: bool = False,
+        positions: Optional[torch.Tensor] = None,
+        use_sde_embed=False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         # compute padding mask. This is needed for multi-head attention
+        if use_sde_embed:
+          # tokens: batch_size x len x char_dim
+          x = self.sde_embed_tokens(tokens)
+          # only use the first character idx as tokens for padding and position
+          tokens = tokens[:, :, 0]
+        else:
+          x = self.embed_tokens(tokens)
         padding_mask = tokens.eq(self.padding_idx)
         if not self.traceable and not self.tpu and not padding_mask.any():
             padding_mask = None
-
-        x = self.embed_tokens(tokens)
 
         if self.embed_scale is not None:
             x *= self.embed_scale

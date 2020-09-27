@@ -13,7 +13,7 @@ import torch
 
 from . import FairseqDataset
 from fairseq.data.fasta_dataset import FastaDataset
-
+from . import data_utils
 
 def __best_fitting_dtype(vocab_size=None):
     if vocab_size is not None and vocab_size < 65500:
@@ -23,7 +23,7 @@ def __best_fitting_dtype(vocab_size=None):
 
 
 def get_available_dataset_impl():
-    return ['raw', 'lazy', 'cached', 'mmap', 'fasta']
+    return ['raw', 'raw_charngram', 'lazy', 'cached', 'mmap', 'fasta']
 
 
 def infer_dataset_impl(path):
@@ -53,16 +53,20 @@ def make_builder(out_file, impl, vocab_size=None):
         return IndexedDatasetBuilder(out_file)
 
 
-def make_dataset(path, impl, fix_lua_indexing=False, dictionary=None):
+def make_dataset(path, impl, args=None, fix_lua_indexing=False, dictionary=None, max_char_size=-1, char_ngram=False):
     if impl == 'raw' and IndexedRawTextDataset.exists(path):
         assert dictionary is not None
         return IndexedRawTextDataset(path, dictionary)
+    if impl == 'raw_charngram' and IndexedRawCharNgramDataset.exists(path):
+        assert dictionary is not None
+        assert args is not None
+        return IndexedRawCharNgramDataset(args, path, dictionary)
     elif impl == 'lazy' and IndexedDataset.exists(path):
         return IndexedDataset(path, fix_lua_indexing=fix_lua_indexing)
     elif impl == 'cached' and IndexedDataset.exists(path):
         return IndexedCachedDataset(path, fix_lua_indexing=fix_lua_indexing)
     elif impl == 'mmap' and MMapIndexedDataset.exists(path):
-        return MMapIndexedDataset(path)
+        return MMapIndexedDataset(path, max_char_size, char_ngram)
     elif impl == 'fasta' and FastaDataset.exists(path):
         from fairseq.data.fasta_dataset import EncodedFastaDataset
         return EncodedFastaDataset(path, dictionary)
@@ -233,6 +237,68 @@ class IndexedCachedDataset(IndexedDataset):
         if self.fix_lua_indexing:
             item -= 1  # subtract 1 for 0-based indexing
         return item
+
+class IndexedRawCharNgramDataset(FairseqDataset):
+    """Takes a text file as input and binarizes it in memory at instantiation.
+    Original lines are also kept in memory"""
+
+    def __init__(self, args, path, dictionary, append_eos=True, reverse_order=False):
+        self.args = args
+        self.tokens_list = []
+        self.lines = []
+        self.sizes = []
+        self.append_eos = append_eos
+        self.reverse_order = reverse_order
+        self.read_data(path, dictionary)
+        self.size = len(self.tokens_list)
+
+    def read_data(self, path, dictionary):
+        path = path + '.None-None'
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                self.lines.append(line.strip('\n'))
+                tokens = []
+                for w in line.split():
+                    # max_char_len
+                    char_ngram = data_utils.word_to_ngram(w, dictionary, self.args.max_char_len)
+                    tokens.append(char_ngram)
+                if self.append_eos:
+                    char_ngram = [dictionary.eos()] + [dictionary.pad()]*(self.args.max_char_len-1)
+                    tokens.append(char_ngram)
+                # sent_len, max_char_len
+                self.sizes.append(len(tokens))
+                tokens = torch.LongTensor(tokens)
+                self.tokens_list.append(tokens)
+        self.sizes = np.array(self.sizes)
+
+    def check_index(self, i):
+        if i < 0 or i >= self.size:
+            raise IndexError('index out of range')
+
+    @lru_cache(maxsize=8)
+    def __getitem__(self, i):
+        self.check_index(i)
+        return self.tokens_list[i]
+
+    def get_original_text(self, i):
+        self.check_index(i)
+        return self.lines[i]
+
+    def __del__(self):
+        pass
+
+    def __len__(self):
+        return self.size
+
+    def num_tokens(self, index):
+        return self.sizes[index]
+
+    def size(self, index):
+        return self.sizes[index]
+
+    @staticmethod
+    def exists(path):
+        return os.path.exists(path+'.None-None')
 
 
 class IndexedRawTextDataset(FairseqDataset):
@@ -426,7 +492,6 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
             self._sizes = np.frombuffer(self._bin_buffer, dtype=np.int32, count=self._len, offset=offset)
             self._pointers = np.frombuffer(self._bin_buffer, dtype=np.int64, count=self._len,
                                            offset=offset + self._sizes.nbytes)
-
         def __del__(self):
             self._bin_buffer_mmap._mmap.close()
             del self._bin_buffer_mmap
@@ -446,12 +511,14 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
         def __len__(self):
             return self._len
 
-    def __init__(self, path):
+    def __init__(self, path, max_char_size=0, char_ngram=False):
         super().__init__()
 
         self._path = None
         self._index = None
         self._bin_buffer = None
+        self.max_char_size = max_char_size
+        self.char_ngram = char_ngram 
 
         self._do_init(path)
 
@@ -483,12 +550,17 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
         np_array = np.frombuffer(self._bin_buffer, dtype=self._index.dtype, count=size, offset=ptr)
         if self._index.dtype != np.int64:
             np_array = np_array.astype(np.int64)
-
-        return torch.from_numpy(np_array)
+        if self.char_ngram:
+            return torch.from_numpy(np_array).reshape(-1, self.max_char_size)
+        else:
+            return torch.from_numpy(np_array)
 
     @property
     def sizes(self):
-        return self._index.sizes
+        if self.char_ngram:
+            return self._index.sizes // self.max_char_size
+        else:
+            return self._index.sizes
 
     @property
     def supports_prefetch(self):
