@@ -98,6 +98,7 @@ class MaskedLMTask(LegacyFairseqTask):
             self.source_dictionary,
             self.args.dataset_impl,
             combine=combine,
+            args=self.args,
         )
         if dataset is None:
             raise FileNotFoundError('Dataset not found: {} ({})'.format(split, split_path))

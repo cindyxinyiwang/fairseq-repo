@@ -160,7 +160,7 @@ class RobertaModel(FairseqEncoderModel):
                         name, num_classes, prev_num_classes, inner_dim, prev_inner_dim
                     )
                 )
-        if self.args.use_sde_embed:
+        if self.args.use_sde_embed and self.args.subword_data is not None:
             emb_dim = self.args.encoder_embed_dim*2
         else:
             emb_dim = self.args.encoder_embed_dim
