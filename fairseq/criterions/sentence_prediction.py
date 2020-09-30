@@ -44,7 +44,7 @@ class SentencePredictionCriterion(FairseqCriterion):
         logits, extra = model(
             **sample['net_input'],
             features_only=True,
-            classification_head_name=list(model.classification_heads.keys())[0],
+            classification_head_name=self.classification_head_name,
         )
         #if len(logits) == 2 and not valid:
         if len(logits) == 2:
