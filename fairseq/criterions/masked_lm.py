@@ -50,12 +50,13 @@ class MaskedLmLoss(FairseqCriterion):
             )
 
         logits = model(**sample['net_input'], masked_tokens=masked_tokens)[0]
+        logits = logits.view(-1, logits.size(-1))
         targets = model.get_targets(sample, [logits])
         if masked_tokens is not None:
             targets = targets[masked_tokens]
 
         loss = modules.cross_entropy(
-            logits.view(-1, logits.size(-1)),
+            logits,
             targets.view(-1),
             reduction='sum',
             ignore_index=self.padding_idx,

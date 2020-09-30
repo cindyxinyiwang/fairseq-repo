@@ -102,6 +102,8 @@ class RobertaModel(FairseqEncoderModel):
         
         parser.add_argument('--pretrained_sde_path', type=str, default=None,
                             help='Path to the pretrained sde.')
+        parser.add_argument('--combine-type', type=str, default='cat',
+                            help='Method to combine sde and subword encoding.')
 
     @classmethod
     def build_model(cls, args, task):
@@ -134,10 +136,21 @@ class RobertaModel(FairseqEncoderModel):
     def forward(self, src_tokens, subword_src_tokens=None, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
         if classification_head_name is not None:
             features_only = True
-        x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
-
+        if subword_src_tokens is not None:
+            # x: B, T, C
+            x, extra = self.encoder(src_tokens, None, features_only, return_all_hiddens, **kwargs)
+            subword_x, subword_extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
+        else:
+            x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
+        
         if classification_head_name is not None:
+            if subword_src_tokens is not None and self.args.combine_type == 'cat':
+                x = torch.cat([x[:,0,:].unsqueeze(1), subword_x[:,0,:].unsqueeze(1)], dim=-1)
             x = self.classification_heads[classification_head_name](x)
+            if subword_src_tokens is not None and self.args.combine_type == 'sim_loss':
+                subword_x = self.classification_heads[classification_head_name](subword_x)
+                x = [x, subword_x]
+                extra = [extra, subword_extra]
         return x, extra
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):
@@ -160,7 +173,7 @@ class RobertaModel(FairseqEncoderModel):
                         name, num_classes, prev_num_classes, inner_dim, prev_inner_dim
                     )
                 )
-        if self.args.use_sde_embed and self.args.subword_data is not None:
+        if self.args.use_sde_embed and self.args.subword_data is not None and self.args.combine_type == 'cat':
             emb_dim = self.args.encoder_embed_dim*2
         else:
             emb_dim = self.args.encoder_embed_dim
@@ -382,13 +395,13 @@ class RobertaEncoder(FairseqEncoder):
         return x, extra
 
     def extract_features(self, src_tokens, subword_src_tokens=None, return_all_hiddens=False, **unused):
-        inner_states, _ = self.sentence_encoder(
+        inner_states, sent_rep = self.sentence_encoder(
             src_tokens,
             subword_src_tokens,
             last_state_only=not return_all_hiddens,
         )
         features = inner_states[-1].transpose(0, 1)  # T x B x C -> B x T x C
-        return features, {'inner_states': inner_states if return_all_hiddens else None}
+        return features, {'inner_states': inner_states if return_all_hiddens else None, 'sent_rep': sent_rep if self.args.combine_type == 'sim_loss' else None}
 
     def output_layer(self, features, masked_tokens=None, **unused):
         return self.lm_head(features, masked_tokens)

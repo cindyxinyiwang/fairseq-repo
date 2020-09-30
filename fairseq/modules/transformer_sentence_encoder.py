@@ -232,12 +232,10 @@ class TransformerSentenceEncoder(nn.Module):
         positions: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if self.args.use_sde_embed:
-            sde_states, sde_sent_rep = self._forward(tokens, segment_labels, last_state_only, positions, use_sde_embed=True)
             if subword_src_tokens is not None:
-                states, sent_rep = self._forward(subword_src_tokens, segment_labels, last_state_only, positions)
-                return [torch.cat([sde_sent_rep.unsqueeze(0), sent_rep.unsqueeze(0)], dim=-1) ], (0.5*sde_sent_rep+sent_rep)/1.5
+                return self._forward(subword_src_tokens, segment_labels, last_state_only, positions)
             else:
-                return sde_states, sde_sent_rep
+                return self._forward(tokens, segment_labels, last_state_only, positions, use_sde_embed=True)
         else:
             return self._forward(tokens, segment_labels, last_state_only, positions)
 

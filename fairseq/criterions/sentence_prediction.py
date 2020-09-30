@@ -28,7 +28,7 @@ class SentencePredictionCriterion(FairseqCriterion):
                             help='name of the classification head to use')
         # fmt: on
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, valid=False, l_subword=0, l_kl=0, l_rep=0):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -41,21 +41,42 @@ class SentencePredictionCriterion(FairseqCriterion):
             and self.classification_head_name in model.classification_heads
         ), 'model must provide sentence classification head for --criterion=sentence_prediction'
 
-        logits, _ = model(
+        logits, extra = model(
             **sample['net_input'],
             features_only=True,
-            classification_head_name=self.classification_head_name,
+            classification_head_name=list(model.classification_heads.keys())[0],
         )
-        targets = model.get_targets(sample, [logits]).view(-1)
-        sample_size = targets.numel()
+        #if len(logits) == 2 and not valid:
+        if len(logits) == 2:
+            logits_sde, logits_subword = logits
+            targets = model.get_targets(sample, [logits_sde]).view(-1)
+            sample_size = targets.numel()
+            lprobs_sde = F.log_softmax(logits_sde, dim=-1, dtype=torch.float32)
+            loss_sde = F.nll_loss(lprobs_sde, targets, reduction='sum')
 
-        if not self.regression_target:
-            lprobs = F.log_softmax(logits, dim=-1, dtype=torch.float32)
-            loss = F.nll_loss(lprobs, targets, reduction='sum')
+            lprobs_subword = F.log_softmax(logits_subword, dim=-1, dtype=torch.float32)
+            loss_subword = F.nll_loss(lprobs_subword, targets, reduction='sum')
+
+            kl = F.kl_div(lprobs_sde, lprobs_subword, reduction='sum', log_target=True)
+
+            sent_rep_sde, sent_rep_subword = extra[0]['sent_rep'], extra[1]['sent_rep']
+            rep_loss = -F.cosine_similarity(sent_rep_sde, sent_rep_subword)
+            rep_loss = rep_loss.sum()
+
+            loss = loss_sde + loss_subword + kl + rep_loss
+            logits = logits_sde+logits_subword
         else:
-            logits = logits.view(-1).float()
-            targets = targets.float()
-            loss = F.mse_loss(logits, targets, reduction='sum')
+            if len(logits) == 2: logits = logits[0]
+            targets = model.get_targets(sample, [logits]).view(-1)
+            sample_size = targets.numel()
+
+            if not self.regression_target:
+                lprobs = F.log_softmax(logits, dim=-1, dtype=torch.float32)
+                loss = F.nll_loss(lprobs, targets, reduction='sum')
+            else:
+                logits = logits.view(-1).float()
+                targets = targets.float()
+                loss = F.mse_loss(logits, targets, reduction='sum')
 
         logging_output = {
             'loss': loss.data,
