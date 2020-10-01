@@ -46,8 +46,8 @@ class SentencePredictionCriterion(FairseqCriterion):
             features_only=True,
             classification_head_name=self.classification_head_name,
         )
-        #if len(logits) == 2 and not valid:
-        if len(logits) == 2:
+        #if len(logits) == 2:
+        if False:
             logits_sde, logits_subword = logits
             targets = model.get_targets(sample, [logits_sde]).view(-1)
             sample_size = targets.numel()
@@ -63,10 +63,9 @@ class SentencePredictionCriterion(FairseqCriterion):
             rep_loss = -F.cosine_similarity(sent_rep_sde, sent_rep_subword)
             rep_loss = rep_loss.sum()
 
-            loss = loss_sde + loss_subword + kl + rep_loss
+            loss = loss_sde + loss_subword + 0.1*kl + 0.1*rep_loss
             logits = logits_sde+logits_subword
         else:
-            if len(logits) == 2: logits = logits[0]
             targets = model.get_targets(sample, [logits]).view(-1)
             sample_size = targets.numel()
 

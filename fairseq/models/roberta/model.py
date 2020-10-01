@@ -142,15 +142,16 @@ class RobertaModel(FairseqEncoderModel):
             subword_x, subword_extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
         else:
             x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
+        #x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
         
         if classification_head_name is not None:
             if subword_src_tokens is not None and self.args.combine_type == 'cat':
                 x = torch.cat([x[:,0,:].unsqueeze(1), subword_x[:,0,:].unsqueeze(1)], dim=-1)
             x = self.classification_heads[classification_head_name](x)
-            if subword_src_tokens is not None and self.args.combine_type == 'sim_loss':
-                subword_x = self.classification_heads[classification_head_name](subword_x)
-                x = [x, subword_x]
-                extra = [extra, subword_extra]
+            #if subword_src_tokens is not None and self.args.combine_type == 'sim_loss':
+            #    subword_x = self.classification_heads[classification_head_name](subword_x)
+            #    x = [x, subword_x]
+            #    extra = [extra, subword_extra]
         return x, extra
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):

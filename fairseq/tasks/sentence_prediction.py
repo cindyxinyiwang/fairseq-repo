@@ -215,6 +215,7 @@ class SentencePredictionTask(LegacyFairseqTask):
                     pad_idx=self.subword_data_dictionary.pad(),
             )
             dataset['net_input'].update(subword_src_tokens=subword_src_tokens)
+            dataset['net_input']['src_lengths'] = NumelDataset(subword_src_tokens, reduce=False)
 
         if self.args.add_prev_output_tokens:
             prev_tokens_dataset = RightPadDataset(

@@ -234,6 +234,10 @@ class TransformerSentenceEncoder(nn.Module):
         if self.args.use_sde_embed:
             if subword_src_tokens is not None:
                 return self._forward(subword_src_tokens, segment_labels, last_state_only, positions)
+                #x, sent_rep = self._forward(subword_src_tokens, segment_labels, last_state_only, positions)
+                #sde_x, sde_sent_rep = self._forward(tokens, segment_labels, last_state_only, positions, use_sde_embed=True)
+                #return [sde_x, x], [sde_sent_rep, sent_rep]
+                #return [torch.cat([sde_sent_rep.unsqueeze(0), sent_rep.unsqueeze(0)], dim=-1)],  None
             else:
                 return self._forward(tokens, segment_labels, last_state_only, positions, use_sde_embed=True)
         else:
