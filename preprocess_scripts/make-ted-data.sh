@@ -15,7 +15,7 @@ SPM_ENCODE=$FAIR_SCRIPTS/spm_encode.py
 TOKENIZER=mosesdecoder/scripts/tokenizer/tokenizer.perl
 
 LANS=(
-  aze)
+  rus)
 
 for i in ${!LANS[*]}; do
   LAN=${LANS[$i]}

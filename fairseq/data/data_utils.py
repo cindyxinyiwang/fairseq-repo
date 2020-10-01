@@ -24,7 +24,27 @@ logger = logging.getLogger(__name__)
 def word_to_ngram(word, vocab, max_char_len):
     """Get char ngram indices of a word. vocab: dictionary of character ngrams """
     idx = []
+    for n in range(1, 4):
+        for i in range(len(word)-n+1):
+        j = i+n
+            char_idx = vocab.index(word[i:j])
+            #print(char, vocab.index(char))
+            if char_idx != vocab.unk():
+              idx.append(char_idx)
+    if len(idx)==0:
+        print("unk word:", word)
+        idx = [vocab.unk()] + [vocab.pad()]*(max_char_len-1)
+    if len(idx) > max_char_len:
+        idx = idx[:max_char_len]
+    else:
+        idx = idx + [vocab.pad()]*(max_char_len-len(idx))
+    return idx
+
+def word_to_bpe_ngram(word, vocab, max_char_len):
+    """Get char ngram indices of a word. vocab: dictionary of character ngrams """
+    idx = []
     for i in range(len(word)):
+
         #for n in range(1, 4):
         #for j in range(i+n, len(word), n):
         for j in range(i+1, len(word)+1):

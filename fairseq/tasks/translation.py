@@ -41,7 +41,8 @@ def load_langpair_dataset(
     max_target_positions, prepend_bos=False, load_alignments=False,
     truncate_source=False, append_source_id=False,
     num_buckets=0,
-    shuffle=True,
+    shuffle=True, 
+    args=None,
 ):
 
     def split_exists(split, src, tgt, lang, data_path):
@@ -65,7 +66,7 @@ def load_langpair_dataset(
             else:
                 raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
 
-        src_dataset = data_utils.load_indexed_dataset(prefix + src, src_dict, dataset_impl)
+        src_dataset = data_utils.load_indexed_dataset(prefix + src, src_dict, dataset_impl, args=args)
         if truncate_source:
             src_dataset = AppendTokenDataset(
                 TruncateDataset(
@@ -76,7 +77,7 @@ def load_langpair_dataset(
             )
         src_datasets.append(src_dataset)
 
-        tgt_dataset = data_utils.load_indexed_dataset(prefix + tgt, tgt_dict, dataset_impl)
+        tgt_dataset = data_utils.load_indexed_dataset(prefix + tgt, tgt_dict, dataset_impl, args=args)
         if tgt_dataset is not None:
             tgt_datasets.append(tgt_dataset)
 
@@ -268,6 +269,7 @@ class TranslationTask(LegacyFairseqTask):
             truncate_source=self.args.truncate_source,
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split != 'test'),
+            args=self.args,
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):

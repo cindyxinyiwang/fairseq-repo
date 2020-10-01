@@ -7,17 +7,19 @@ fi
 
 VOCAB_SIZE=4000
 RAW_DDIR=data/ted_raw/
-PROC_DDIR=data/ted_processed/multilingual_sepspm"$VOCAB_SIZE"/
-BINARIZED_DDIR=fairseq/data-bin/ted_azetur_sepspm"$VOCAB_SIZE"/
-FAIR_SCRIPTS=fairseq/scripts
+PROC_DDIR=data/ted_processed/var_rus_sepspm"$VOCAB_SIZE"/
+BINARIZED_DDIR=data-bin/var_rus_sepspm"$VOCAB_SIZE"/
+FAIR_SCRIPTS=scripts/
 SPM_TRAIN=$FAIR_SCRIPTS/spm_train.py
 SPM_ENCODE=$FAIR_SCRIPTS/spm_encode.py
 TOKENIZER=mosesdecoder/scripts/tokenizer/tokenizer.perl
 FILTER=mosesdecoder/scripts/training/clean-corpus-n.perl
 
 LANS=(
-  aze
-  tur)
+  rus
+  bel
+  ukr)
+MAIN=rus
 
 for LAN in ${LANS[@]}; do
   mkdir -p "$PROC_DDIR"/"$LAN"_eng
@@ -41,7 +43,7 @@ for LAN in ${LANS[@]}; do
 done
 
 # learn BPE with sentencepiece for English
-TRAIN_FILES=$(for LAN in "${LANS[@]}"; do echo "$RAW_DDIR"/"$LAN"_eng/ted-train.mtok.eng; done | tr "\n" ",")
+TRAIN_FILES="$RAW_DDIR"/"$MAIN"_eng/ted-train.mtok.eng
 echo "learning BPE for eng over ${TRAIN_FILES}..."
 python "$SPM_TRAIN" \
       --input=$TRAIN_FILES \
@@ -50,17 +52,17 @@ python "$SPM_TRAIN" \
       --character_coverage=1.0 \
       --model_type=bpe
 
-# train a separate BPE model for each language, then encode the data with the corresponding BPE model
-for LAN in ${LANS[@]}; do
-  TRAIN_FILES="$RAW_DDIR"/"$LAN"_eng/ted-train.mtok."$LAN"
-  echo "learning BPE for ${TRAIN_FILES} ..."
-  python "$SPM_TRAIN" \
-        --input=$TRAIN_FILES \
-        --model_prefix="$PROC_DDIR"/"$LAN"_eng/spm"$VOCAB_SIZE" \
-        --vocab_size=$VOCAB_SIZE \
-        --character_coverage=1.0 \
-        --model_type=bpe
+TRAIN_FILES="$RAW_DDIR"/"$MAIN"_eng/ted-train.mtok."$MAIN"
+echo "learning BPE for eng over ${TRAIN_FILES}..."
+python "$SPM_TRAIN" \
+      --input=$TRAIN_FILES \
+      --model_prefix="$PROC_DDIR"/spm"$VOCAB_SIZE"."$MAIN" \
+      --vocab_size=$VOCAB_SIZE \
+      --character_coverage=1.0 \
+      --model_type=bpe
 
+# train a separate BPE model for main language, then encode the data with this BPE model
+for LAN in ${LANS[@]}; do
   python "$SPM_ENCODE" \
         --model="$PROC_DDIR"/spm"$VOCAB_SIZE".eng.model \
         --output_format=piece \
@@ -68,7 +70,7 @@ for LAN in ${LANS[@]}; do
         --outputs "$PROC_DDIR"/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE".prefilter.eng \
  
   python "$SPM_ENCODE" \
-        --model="$PROC_DDIR"/"$LAN"_eng/spm"$VOCAB_SIZE".model \
+        --model="$PROC_DDIR"/spm"$VOCAB_SIZE"."$MAIN".model \
         --output_format=piece \
         --inputs "$RAW_DDIR"/"$LAN"_eng/ted-train.mtok."$LAN"  \
         --outputs "$PROC_DDIR"/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE".prefilter."$LAN" \
@@ -88,7 +90,7 @@ for LAN in ${LANS[@]}; do
   for split in dev test;
   do
   python "$SPM_ENCODE" \
-        --model="$PROC_DDIR"/"$LAN"_eng/spm"$VOCAB_SIZE".model \
+        --model="$PROC_DDIR"/spm"$VOCAB_SIZE"."$MAIN".model \
         --output_format=piece \
         --inputs "$RAW_DDIR"/"$LAN"_eng/ted-"$split".mtok."$LAN"  \
         --outputs "$PROC_DDIR"/"$LAN"_eng/ted-"$split".spm"$VOCAB_SIZE"."$LAN" 
@@ -99,15 +101,11 @@ done
 # Concatenate all the training data from all languages to get combined vocabulary
 mkdir -p $BINARIZED_DDIR
 mkdir -p $BINARIZED_DDIR/M2O/
-mkdir -p $BINARIZED_DDIR/O2M/
 
-for LAN in ${LANS[@]}; do
-  cat $PROC_DDIR/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE"."$LAN" >> $BINARIZED_DDIR/combined-train.src
-  cat $PROC_DDIR/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE".eng >> $BINARIZED_DDIR/combined-train.eng
-done
-fairseq-preprocess -s src -t eng \
-  --trainpref $BINARIZED_DDIR/combined-train \
-  --joined-dictionary \
+fairseq-preprocess -s $MAIN -t eng \
+  --trainpref "$PROC_DDIR"/"$MAIN"_eng/ted-train.spm"$VOCAB_SIZE" \
+  --validpref "$PROC_DDIR"/"$MAIN"_eng/ted-dev.spm"$VOCAB_SIZE" \
+  --testpref "$PROC_DDIR"/"$MAIN"_eng/ted-test.spm"$VOCAB_SIZE" \
   --workers 8 \
   --thresholdsrc 0 \
   --thresholdtgt 0 \
@@ -120,16 +118,8 @@ for LAN in ${LANS[@]}; do
         --trainpref "$PROC_DDIR"/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE" \
         --validpref "$PROC_DDIR"/"$LAN"_eng/ted-dev.spm"$VOCAB_SIZE" \
         --testpref "$PROC_DDIR"/"$LAN"_eng/ted-test.spm"$VOCAB_SIZE" \
-      	--srcdict $BINARIZED_DDIR/dict.src.txt \
+      	--srcdict $BINARIZED_DDIR/dict."$MAIN".txt \
       	--tgtdict $BINARIZED_DDIR/dict.eng.txt \
         --destdir $BINARIZED_DDIR/M2O/
-  
-  # Binarize the data for one-to-many translation
-  fairseq-preprocess --source-lang eng --target-lang $LAN \
-        --trainpref "$PROC_DDIR"/"$LAN"_eng/ted-train.spm"$VOCAB_SIZE" \
-        --validpref "$PROC_DDIR"/"$LAN"_eng/ted-dev.spm"$VOCAB_SIZE" \
-        --testpref "$PROC_DDIR"/"$LAN"_eng/ted-test.spm"$VOCAB_SIZE" \
-      	--srcdict $BINARIZED_DDIR/dict.eng.txt \
-      	--tgtdict $BINARIZED_DDIR/dict.src.txt \
-        --destdir $BINARIZED_DDIR/O2M/
 done
+

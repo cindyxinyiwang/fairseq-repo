@@ -337,10 +337,10 @@ class Dictionary(object):
                 for word in tokenize(line):
                     if char_ngram:
                         chars = []
-                        for i in range(len(word)):
-                            for n in range(1, 4):
-                                for j in range(i+n, len(word), n):
-                                    chars.append(word[i:j])
+                        for n in range(1, 4):
+                            for i in range(len(word)-n+1):
+                                j = i+n
+                                chars.append(word[i:j])
                         counter.update(chars)
                     else:
                         counter.update([word])
