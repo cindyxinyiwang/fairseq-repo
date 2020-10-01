@@ -26,7 +26,7 @@ def word_to_ngram(word, vocab, max_char_len):
     idx = []
     for n in range(1, 4):
         for i in range(len(word)-n+1):
-        j = i+n
+            j = i+n
             char_idx = vocab.index(word[i:j])
             #print(char, vocab.index(char))
             if char_idx != vocab.unk():
@@ -78,6 +78,7 @@ def infer_language_pair(path):
 
 def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False, pad_to_length=None):
     """Convert a list of 1d tensors into a padded 2d tensor."""
+    if len(values[0].size()) == 2: return _collate_tokens_2d(values, pad_idx, eos_idx, left_pad, move_eos_to_beginning, pad_to_length)
     size = max(v.size(0) for v in values)
     size = size if pad_to_length is None else max(size, pad_to_length)
     res = values[0].new(len(values), size).fill_(pad_idx)
@@ -97,6 +98,30 @@ def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_be
     for i, v in enumerate(values):
         copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
     return res
+
+def _collate_tokens_2d(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False, pad_to_length=None):
+    """Convert a list of 2d tensors into a padded 3d tensor."""
+    size = max(v.size(0) for v in values)
+    char_len = values[0].size(1)
+    size = size if pad_to_length is None else max(size, pad_to_length)
+    res = values[0].new(len(values), size, char_len).fill_(pad_idx)
+
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        if move_eos_to_beginning:
+            if eos_idx is None:
+                # if no eos_idx is specified, then use the last token in src
+                dst[0] = src[-1]
+            else:
+                dst[0] = eos_idx
+            dst[1:] = src[:-1]
+        else:
+            dst.copy_(src)
+
+    for i, v in enumerate(values):
+        copy_tensor(v, res[i][size - len(v):][:] if left_pad else res[i][:len(v)][:])
+    return res
+
 
 
 def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False, default='cached', args=None, char_ngram=False):

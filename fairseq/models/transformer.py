@@ -26,6 +26,7 @@ from fairseq.modules import (
     SinusoidalPositionalEmbedding,
     TransformerDecoderLayer,
     TransformerEncoderLayer,
+    SDE,
 )
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
@@ -212,7 +213,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
             args.share_decoder_input_output_embed = True
         else:
             encoder_embed_tokens = cls.build_embedding(
-                args, src_dict, args.encoder_embed_dim, args.encoder_embed_path
+                args, src_dict, args.encoder_embed_dim, args.encoder_embed_path, use_sde=(args.use_sde_embed and args.src_char_ngram)
             )
             decoder_embed_tokens = cls.build_embedding(
                 args, tgt_dict, args.decoder_embed_dim, args.decoder_embed_path
@@ -223,11 +224,14 @@ class TransformerModel(FairseqEncoderDecoderModel):
         return cls(args, encoder, decoder)
 
     @classmethod
-    def build_embedding(cls, args, dictionary, embed_dim, path=None):
+    def build_embedding(cls, args, dictionary, embed_dim, path=None, use_sde=False):
         num_embeddings = len(dictionary)
         padding_idx = dictionary.pad()
 
-        emb = Embedding(num_embeddings, embed_dim, padding_idx)
+        if use_sde:
+            emb = SDE(dictionary, dim=embed_dim, latent=args.sde_latent)
+        else:
+            emb = Embedding(num_embeddings, embed_dim, padding_idx)
         # if provided, load from preloaded dictionaries
         if path:
             embed_dict = utils.parse_embedding(path)
@@ -306,6 +310,7 @@ class TransformerEncoder(FairseqEncoder):
 
     def __init__(self, args, dictionary, embed_tokens):
         super().__init__(dictionary)
+        self.args = args
         self.register_buffer("version", torch.Tensor([3]))
 
         self.dropout_module = FairseqDropout(args.dropout, module_name=self.__class__.__name__)
@@ -364,6 +369,8 @@ class TransformerEncoder(FairseqEncoder):
     def forward_embedding(self, src_tokens):
         # embed tokens and positions
         x = embed = self.embed_scale * self.embed_tokens(src_tokens)
+        if self.args.use_sde_embed and self.args.src_char_ngram:
+            src_tokens = src_tokens[:, :, 0]
         if self.embed_positions is not None:
             x = embed + self.embed_positions(src_tokens)
         if self.layernorm_embedding is not None:
@@ -396,6 +403,8 @@ class TransformerEncoder(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         x, encoder_embedding = self.forward_embedding(src_tokens)
+        if self.args.use_sde_embed and self.args.src_char_ngram:
+            src_tokens = src_tokens[:, :, 0]
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)

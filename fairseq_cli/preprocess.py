@@ -56,7 +56,7 @@ def main(args):
     def dict_path(lang):
         return dest_path("dict", lang) + ".txt"
 
-    def build_dictionary(filenames, src=False, tgt=False):
+    def build_dictionary(filenames, src=False, tgt=False, char_ngram=False):
         assert src ^ tgt
         return task.build_dictionary(
             filenames,
@@ -64,7 +64,7 @@ def main(args):
             threshold=args.thresholdsrc if src else args.thresholdtgt,
             nwords=args.nwordssrc if src else args.nwordstgt,
             padding_factor=args.padding_factor,
-            char_ngram=args.char_ngram,
+            char_ngram=char_ngram,
         )
 
     target = not args.only_source
@@ -85,7 +85,7 @@ def main(args):
         else:
             assert args.trainpref, "--trainpref must be set if --srcdict is not specified"
             src_dict = build_dictionary(
-                {train_path(lang) for lang in [args.source_lang, args.target_lang]}, src=True
+                {train_path(lang) for lang in [args.source_lang, args.target_lang]}, src=True, char_ngram=args.src_char_ngram
             )
         tgt_dict = src_dict
     else:
@@ -93,14 +93,14 @@ def main(args):
             src_dict = task.load_dictionary(args.srcdict)
         else:
             assert args.trainpref, "--trainpref must be set if --srcdict is not specified"
-            src_dict = build_dictionary([train_path(args.source_lang)], src=True)
+            src_dict = build_dictionary([train_path(args.source_lang)], src=True, char_ngram=args.src_char_ngram)
 
         if target:
             if args.tgtdict:
                 tgt_dict = task.load_dictionary(args.tgtdict)
             else:
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
-                tgt_dict = build_dictionary([train_path(args.target_lang)], tgt=True)
+                tgt_dict = build_dictionary([train_path(args.target_lang)], tgt=True, char_ngram=args.trg_char_ngram)
         else:
             tgt_dict = None
 
@@ -108,7 +108,7 @@ def main(args):
     if target and tgt_dict is not None:
         tgt_dict.save(dict_path(args.target_lang))
 
-    def make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers):
+    def make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers, char_ngram):
         logger.info("[{}] Dictionary: {} types".format(lang, len(vocab)))
         n_seq_tok = [0, 0]
         replaced = Counter()
@@ -136,7 +136,8 @@ def main(args):
                         prefix,
                         lang,
                         offsets[worker_id],
-                        offsets[worker_id + 1]
+                        offsets[worker_id + 1],
+                        char_ngram
                     ),
                     callback=merge_result
                 )
@@ -147,7 +148,7 @@ def main(args):
         merge_result(
             Binarizer.binarize(
                 input_file, vocab, lambda t: ds.add_item(t),
-                offset=0, end=offsets[1], char_ngram=args.char_ngram, max_char_size=args.max_char_size,
+                offset=0, end=offsets[1], char_ngram=char_ngram, max_char_size=args.max_char_size,
             )
         )
         if num_workers > 1:
@@ -226,7 +227,7 @@ def main(args):
             )
         )
 
-    def make_dataset(vocab, input_prefix, output_prefix, lang, num_workers=1):
+    def make_dataset(vocab, input_prefix, output_prefix, lang, num_workers=1, char_ngram=False):
         if args.dataset_impl == "raw":
             # Copy original text file to destination folder
             output_text_file = dest_path(
@@ -235,19 +236,19 @@ def main(args):
             )
             shutil.copyfile(file_name(input_prefix, lang), output_text_file)
         else:
-            make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers)
+            make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers, char_ngram)
 
-    def make_all(lang, vocab):
+    def make_all(lang, vocab, char_ngram):
         if args.trainpref:
-            make_dataset(vocab, args.trainpref, "train", lang, num_workers=args.workers)
+            make_dataset(vocab, args.trainpref, "train", lang, num_workers=args.workers, char_ngram=char_ngram)
         if args.validpref:
             for k, validpref in enumerate(args.validpref.split(",")):
                 outprefix = "valid{}".format(k) if k > 0 else "valid"
-                make_dataset(vocab, validpref, outprefix, lang, num_workers=args.workers)
+                make_dataset(vocab, validpref, outprefix, lang, num_workers=args.workers, char_ngram=char_ngram)
         if args.testpref:
             for k, testpref in enumerate(args.testpref.split(",")):
                 outprefix = "test{}".format(k) if k > 0 else "test"
-                make_dataset(vocab, testpref, outprefix, lang, num_workers=args.workers)
+                make_dataset(vocab, testpref, outprefix, lang, num_workers=args.workers, char_ngram=char_ngram)
 
     def make_all_alignments():
         if args.trainpref and os.path.exists(args.trainpref + "." + args.align_suffix):
@@ -257,9 +258,9 @@ def main(args):
         if args.testpref and os.path.exists(args.testpref + "." + args.align_suffix):
             make_binary_alignment_dataset(args.testpref + "." + args.align_suffix, "test.align", num_workers=args.workers)
 
-    make_all(args.source_lang, src_dict)
+    make_all(args.source_lang, src_dict, args.src_char_ngram)
     if target:
-        make_all(args.target_lang, tgt_dict)
+        make_all(args.target_lang, tgt_dict, args.trg_char_ngram)
     if args.align_suffix:
         make_all_alignments()
 
@@ -308,7 +309,7 @@ def main(args):
                 print("{} {}".format(src_dict[k], tgt_dict[v]), file=f)
 
 
-def binarize(args, filename, vocab, output_prefix, lang, offset, end, append_eos=True):
+def binarize(args, filename, vocab, output_prefix, lang, offset, end, char_ngram, append_eos=True):
     ds = indexed_dataset.make_builder(dataset_dest_file(args, output_prefix, lang, "bin"),
                                       impl=args.dataset_impl, vocab_size=len(vocab))
 
@@ -316,7 +317,7 @@ def binarize(args, filename, vocab, output_prefix, lang, offset, end, append_eos
         ds.add_item(tensor)
 
     res = Binarizer.binarize(filename, vocab, consumer, append_eos=append_eos,
-                             offset=offset, end=end, char_ngram=args.char_ngram, max_char_size=args.max_char_size)
+                             offset=offset, end=end, char_ngram=char_ngram, max_char_size=args.max_char_size)
     ds.finalize(dataset_dest_file(args, output_prefix, lang, "idx"))
     return res
 

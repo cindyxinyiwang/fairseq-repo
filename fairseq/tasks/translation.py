@@ -66,7 +66,7 @@ def load_langpair_dataset(
             else:
                 raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
 
-        src_dataset = data_utils.load_indexed_dataset(prefix + src, src_dict, dataset_impl, args=args)
+        src_dataset = data_utils.load_indexed_dataset(prefix + src, src_dict, dataset_impl, args=args, char_ngram=args.src_char_ngram)
         if truncate_source:
             src_dataset = AppendTokenDataset(
                 TruncateDataset(
