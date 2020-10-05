@@ -71,7 +71,7 @@ class FairseqTask(object):
         d = Dictionary(char_ngram=char_ngram)
         for filename in filenames:
             Dictionary.add_file_to_dictionary(
-                filename, d, tokenizer.tokenize_line, workers,
+                filename, d, tokenizer.tokenize_line, workers, char_ngram
             )
         d.finalize(threshold=threshold, nwords=nwords, padding_factor=padding_factor)
         return d

@@ -359,6 +359,18 @@ def add_dataset_args(parser, train=False, gen=False):
                            help='shard generation over N shards')
         group.add_argument('--shard-id', default=0, type=int, metavar='ID',
                            help='id of the shard to generate (id < num_shards)')
+
+    # args for SDE
+    group.add_argument('--use-sde-embed', action='store_true',
+                        help='Use SDE embedding')
+    group.add_argument('--src-char-ngram', action='store_true',
+                        help='Use char ngram for source sentences.')
+    group.add_argument('--sde-latent', type=int, metavar='D', default=0,
+                        help='SDE latent embedding size')
+    group.add_argument('--max-char-len', type=int, metavar='D', default=50,
+                        help='Maximum char ngrams in a word')
+
+
     # fmt: on
     return group
 
@@ -673,15 +685,5 @@ def add_model_args(parser):
     group.add_argument('--arch', '-a', metavar='ARCH',
                        choices=ARCH_MODEL_REGISTRY.keys(),
                        help='model architecture')
-    # args for SDE
-    group.add_argument('--use-sde-embed', action='store_true',
-                        help='Use SDE embedding')
-    group.add_argument('--src-char-ngram', action='store_true',
-                        help='Use char ngram for source sentences.')
-    group.add_argument('--sde-latent', type=int, metavar='D', default=0,
-                        help='SDE latent embedding size')
-    group.add_argument('--max-char-len', type=int, metavar='D', default=50,
-                        help='Maximum char ngrams in a word')
-
     # fmt: on
     return group

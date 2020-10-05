@@ -337,7 +337,7 @@ class Dictionary(object):
                 for word in tokenize(line):
                     if char_ngram:
                         chars = []
-                        for n in range(1, 4):
+                        for n in range(1, 5):
                             for i in range(len(word)-n+1):
                                 j = i+n
                                 chars.append(word[i:j])

@@ -43,6 +43,7 @@ def load_langpair_dataset(
     num_buckets=0,
     shuffle=True, 
     args=None,
+    src_tau=-1, trg_tau=-1,
 ):
 
     def split_exists(split, src, tgt, lang, data_path):
@@ -257,6 +258,9 @@ class TranslationTask(LegacyFairseqTask):
         # infer langcode
         src, tgt = self.args.source_lang, self.args.target_lang
 
+        if not hasattr(self.args, "source_tau") or split != 'train': self.args.source_tau = -1
+        if not hasattr(self.args, "target_tau") or split != 'train': self.args.target_tau = -1
+
         self.datasets[split] = load_langpair_dataset(
             data_path, split, src, self.src_dict, tgt, self.tgt_dict,
             combine=combine, dataset_impl=self.args.dataset_impl,
@@ -270,6 +274,8 @@ class TranslationTask(LegacyFairseqTask):
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split != 'test'),
             args=self.args,
+            src_tau=self.args.source_tau,
+            trg_tau=self.args.target_tau,
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):

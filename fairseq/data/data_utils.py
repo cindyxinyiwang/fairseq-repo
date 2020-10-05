@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 def word_to_ngram(word, vocab, max_char_len):
     """Get char ngram indices of a word. vocab: dictionary of character ngrams """
     idx = []
-    for n in range(1, 4):
+    for n in range(1, 5):
         for i in range(len(word)-n+1):
             j = i+n
             char_idx = vocab.index(word[i:j])

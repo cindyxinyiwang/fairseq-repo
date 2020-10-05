@@ -15,6 +15,7 @@ from fairseq.data import (
     Dictionary,
     LanguagePairDataset,
     RoundRobinZipDatasets,
+    MultiCorpusSampledDatasets,
     TransformEosLangPairDataset,
 )
 from fairseq.models import FairseqMultiModel
@@ -91,6 +92,13 @@ class MultilingualTranslationTask(LegacyFairseqTask):
         parser.add_argument('--decoder-langtok', action='store_true',
                             help='replace beginning-of-sentence in target sentence with target language token')
         # fmt: on
+        parser.add_argument('--dataset-type', default="round_robin", type=str,
+                            help='[round_robin|multi|tcs]')
+        parser.add_argument('--datasize-t', default=1, type=int,
+                            help='[round_robin|multi|tcs]')
+        parser.add_argument('--sample-instance', default='False', type=str, metavar='BOOL',
+                            help='[round_robin|multi|tcs]')
+
 
     def __init__(self, args, dicts, training):
         super().__init__(args)
@@ -212,13 +220,24 @@ class MultilingualTranslationTask(LegacyFairseqTask):
                 tgt_lang=tgt,
             )
 
-        self.datasets[split] = RoundRobinZipDatasets(
-            OrderedDict([
-                (lang_pair, language_pair_dataset(lang_pair))
-                for lang_pair in self.lang_pairs
-            ]),
-            eval_key=None if self.training else "%s-%s" % (self.args.source_lang, self.args.target_lang),
-        )
+        if self.dataset_type == 'round_robin' or split != 'train':
+            self.datasets[split] = RoundRobinZipDatasets(
+                OrderedDict([
+                    (lang_pair, language_pair_dataset(lang_pair))
+                    for lang_pair in self.lang_pairs
+                ]),
+                eval_key=None if self.training else "%s-%s" % (self.args.source_lang, self.args.target_lang),
+            )
+        elif self.dataset_type == 'multi':
+            self.datasets[split] =  MultiCorpusSampledDataset(
+                OrderedDict([
+                    (lang_pair, language_pair_dataset(lang_pair))
+                    for lang_pair in lang_pairs
+                ]),
+                sample_instance=self.args.sample_instance,
+                split=split,
+                datasize_t=self.args.datasize_t,
+            )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
         if constraints is not None:
