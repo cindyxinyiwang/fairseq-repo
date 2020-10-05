@@ -15,7 +15,7 @@ from fairseq.data import (
     Dictionary,
     LanguagePairDataset,
     RoundRobinZipDatasets,
-    MultiCorpusSampledDatasets,
+    MultiCorpusSampledDataset,
     TransformEosLangPairDataset,
 )
 from fairseq.models import FairseqMultiModel

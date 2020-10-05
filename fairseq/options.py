@@ -35,6 +35,7 @@ def get_generation_parser(interactive=False, default_task="translation"):
     add_dataset_args(parser, gen=True)
     add_distributed_training_args(parser, default_world_size=1)
     add_generation_args(parser)
+    add_model_args(parser)
     if interactive:
         add_interactive_args(parser)
     return parser
@@ -299,10 +300,13 @@ def add_preprocess_args(parser):
                        help="Pad dictionary size to be multiple of N")
     group.add_argument("--workers", metavar="N", default=1, type=int,
                        help="number of parallel workers")
+    ### sde options
     group.add_argument("--src-char-ngram", action="store_true",
                        help="binarize into character ngrams")
     group.add_argument("--trg-char-ngram", action="store_true",
                        help="binarize into character ngrams")
+    group.add_argument("--bpe-ngram", action="store_true",
+                       help="use bpe pieces")
     group.add_argument("--max-char-size", metavar="N", default=50, type=int,
                        help="max character size")
     # fmt: on

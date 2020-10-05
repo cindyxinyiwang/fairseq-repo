@@ -44,7 +44,6 @@ def word_to_bpe_ngram(word, vocab, max_char_len):
     """Get char ngram indices of a word. vocab: dictionary of character ngrams """
     idx = []
     for i in range(len(word)):
-
         #for n in range(1, 4):
         #for j in range(i+n, len(word), n):
         for j in range(i+1, len(word)+1):

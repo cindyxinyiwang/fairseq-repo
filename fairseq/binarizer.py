@@ -35,6 +35,7 @@ class Binarizer:
         already_numberized=False,
         char_ngram=False,
         max_char_size=50,
+        bpe_ngram=False,
     ):
         nseq, ntok = 0, 0
         replaced = Counter()
@@ -63,7 +64,10 @@ class Binarizer:
                         ids = []
                         for w in line.split():
                             # max_char_len
-                            char_ngram = data_utils.word_to_ngram(w, dict, max_char_size)
+                            if bpe_ngram:
+                                char_ngram = data_utils.word_to_bpe_ngram(w, dict, max_char_size)
+                            else:
+                                char_ngram = data_utils.word_to_ngram(w, dict, max_char_size)
                             ids.append(char_ngram)
                         if append_eos:
                             char_ngram = [dict.eos()] + [dict.pad()]*(max_char_size-1)
