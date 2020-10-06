@@ -14,33 +14,50 @@ class SimpleConcatDataset(FairseqDataset):
         super().__init__()
         self.vocab = vocab
         self.args = args
-        self.datasets = [dataset_1, dataset_2]
+        if dataset_2 is None:
+            self.datasets = [dataset_1]
+        else:
+            self.datasets = [dataset_1, dataset_2]
         assert all(len(ds) == len(self.datasets[0]) for ds in self.datasets), \
             'datasets must have the same length'
 
     def __getitem__(self, index):
-        return [self.datasets[0][index], self.datasets[1][index]]
+        return [d[index] for d in self.datasets]
 
     def __item_size__(self, index):
-        return len(self.datasets[0][index]) + len(self.datasets[1][index])
+        return sum([len(d[index]) for d in self.datasets])
 
     def __len__(self):
         return len(self.datasets[0])
 
     def collater(self, samples):
-        max_len = max(len(tok_0)+len(tok_1) for tok_0, tok_1 in samples)
-        concat_tokens = []
-        for tok_0, tok_1 in samples:
-            #print(tok_0, tok_1)
-            pad_len = max_len - tok_0.size(0) - tok_1.size(0)
-            if pad_len > 0:
-                pad_tokens = torch.LongTensor(pad_len, tok_0.size(1)).fill_(self.vocab.pad()).to(tok_0.device)
-                concat = torch.cat([tok_0, tok_1, pad_tokens], dim=0)
-            else:
-                concat = torch.cat([tok_0, tok_1], dim=0)
-            concat_tokens.append(concat)
-        concat_tokens = torch.stack(concat_tokens, dim=0)
-        return concat_tokens 
+        if len(self.datasets) == 1:
+            max_len = max(len(tok_0[0]) for tok_0 in samples)
+            concat_tokens = []
+            for tok_0 in samples:
+                tok_0 = tok_0[0]
+                pad_len = max_len - tok_0.size(0)
+                if pad_len > 0:
+                    pad_tokens = torch.LongTensor(pad_len, tok_0.size(1)).fill_(self.vocab.pad()).to(tok_0.device)
+                    concat = torch.cat([tok_0, pad_tokens], dim=0)
+                else:
+                    concat = tok_0
+                concat_tokens.append(concat)
+            concat_tokens = torch.stack(concat_tokens, dim=0)
+            return concat_tokens 
+        else:
+            max_len = max(len(tok_0)+len(tok_1) for tok_0, tok_1 in samples)
+            concat_tokens = []
+            for tok_0, tok_1 in samples:
+                pad_len = max_len - tok_0.size(0) - tok_1.size(0)
+                if pad_len > 0:
+                    pad_tokens = torch.LongTensor(pad_len, tok_0.size(1)).fill_(self.vocab.pad()).to(tok_0.device)
+                    concat = torch.cat([tok_0, tok_1, pad_tokens], dim=0)
+                else:
+                    concat = torch.cat([tok_0, tok_1], dim=0)
+                concat_tokens.append(concat)
+            concat_tokens = torch.stack(concat_tokens, dim=0)
+            return concat_tokens 
 
     @property
     def sizes(self):

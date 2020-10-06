@@ -13,6 +13,7 @@ from fairseq import utils
 from fairseq.data import (
     ConcatSentencesDataset,
     SimpleConcatDataset,
+    BeginOfWord,
     data_utils,
     Dictionary,
     IdDataset,
@@ -26,6 +27,8 @@ from fairseq.data import (
     RollDataset,
     SortDataset,
     StripTokenDataset,
+    BeginOfWord,
+    TransformEosDataset,
 )
 from fairseq.tasks import register_task, LegacyFairseqTask
 from fairseq.data.shorten_dataset import maybe_shorten_dataset
@@ -34,8 +37,8 @@ from fairseq.data.shorten_dataset import maybe_shorten_dataset
 logger = logging.getLogger(__name__)
 
 
-@register_task('sentence_prediction')
-class SentencePredictionTask(LegacyFairseqTask):
+@register_task('sentence_label')
+class SentenceLabelTask(LegacyFairseqTask):
     """
     Sentence (or sentence pair) prediction (classification or regression) task.
 
@@ -51,10 +54,6 @@ class SentencePredictionTask(LegacyFairseqTask):
 
         parser.add_argument('--num-classes', type=int, default=-1,
                             help='number of classes or regression targets')
-        parser.add_argument('--init-token', type=int, default=None,
-                            help='add token at the beginning of each batch item')
-        parser.add_argument('--separator-token', type=int, default=None,
-                            help='add separator token between inputs')
         parser.add_argument('--regression-target', action='store_true', default=False)
         parser.add_argument('--no-shuffle', action='store_true', default=False)
         parser.add_argument('--shorten-method', default='none',
@@ -67,6 +66,8 @@ class SentencePredictionTask(LegacyFairseqTask):
                             help='add prev_output_tokens to sample, used for encoder-decoder arch')
         parser.add_argument('--subword-data', type=str, default=None,
                             help='path to subword data')
+        parser.add_argument('--src-lang', type=str, default=None,
+                            help='source language')
 
     def __init__(self, args, data_dictionary, label_dictionary, subword_data_dictionary=None):
         super().__init__(args)
@@ -101,34 +102,30 @@ class SentencePredictionTask(LegacyFairseqTask):
         # load data dictionary
         data_dict = cls.load_dictionary(
             args,
-            os.path.join(args.data, 'input0', 'dict.txt'),
+            os.path.join(args.data, 'dict.{}.txt'.format(args.src_lang)),
             source=True,
         )
         logger.info('[input] dictionary: {} types'.format(len(data_dict)))
 
-        label_dict = None
-        if not args.regression_target:
-            # load label dictionary
-            label_dict = cls.load_dictionary(
-                args,
-                os.path.join(args.data, 'label', 'dict.txt'),
-                source=False,
-            )
-            logger.info('[label] dictionary: {} types'.format(len(label_dict)))
-        else:
-            label_dict = data_dict
+        # load label dictionary
+        label_dict = cls.load_dictionary(
+            args,
+            os.path.join(args.data, 'dict.label.txt'),
+            source=False,
+        )
+        logger.info('[label] dictionary: {} types'.format(len(label_dict)))
 
         # load subword data dict
         if args.subword_data is not None:
             subword_data_dict = cls.load_dictionary(
                     args,
-                    os.path.join(args.subword_data, 'input0', 'dict.txt'),
+                    os.path.join(args.subword_data, 'dict.tr.txt'),
                     source=True,
             )
             logger.info('[input subword] dictionary: {} types'.format(len(subword_data_dict)))
         else:
             subword_data_dict = None
-        return SentencePredictionTask(args, data_dict, label_dict, subword_data_dict)
+        return SentenceLabelTask(args, data_dict, label_dict, subword_data_dict)
 
     def load_dataset(self, split, combine=False, **kwargs):
         if hasattr(self.args, 'use_sde_embed') and self.args.use_sde_embed:
@@ -138,43 +135,25 @@ class SentencePredictionTask(LegacyFairseqTask):
 
     def load_dataset_sde(self, split, combine=False, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
-        def get_path(type, split, subword=False):
-            if subword:
-                return os.path.join(self.args.subword_data, type, split)
-            else:
-                return os.path.join(self.args.data, type, split)
-
         def make_dataset(type, dictionary, char_ngram=True, subword=False):
-            split_path = get_path(type, split, subword=subword)
-            #if target:
-            #    impl = 'raw'
-            #    split_path += '.None-None'
-            #else:
-            #    impl = self.args.dataset_impl
+            if subword:
+                data_path = self.args.subword_data
+            else:
+                data_path = self.args.data
+            split_path = os.path.join(data_path, split+".{}-{}.{}".format(self.args.src_lang, 'label', type))
             dataset = data_utils.load_indexed_dataset(
                 split_path,
                 dictionary,
                 self.args.dataset_impl,
                 args=self.args,
                 combine=combine,
-                char_ngram=char_ngram
+                char_ngram=char_ngram,
             )
+            assert dataset is not None, 'could not find dataset: {}'.format(split_path)
             return dataset
 
-        input0 = make_dataset('input0', self.source_dictionary)
-        assert input0 is not None, 'could not find dataset: {}'.format(get_path('input0', split))
-        input1 = make_dataset('input1', self.source_dictionary)
-
-        if self.args.init_token is not None:
-            input0 = PrependTokenDataset(input0, self.args.init_token, self.source_dictionary.pad())
-
-        if input1 is None:
-            src_tokens = input0
-        else:
-            if self.args.separator_token is not None:
-                input1 = PrependTokenDataset(input1, self.args.separator_token, self.source_dictionary.pad())
-
-            src_tokens = SimpleConcatDataset(input0, input1, self.dictionary, self.args)
+        src_tokens = make_dataset(self.args.src_lang, self.source_dictionary)
+        src_tokens = SimpleConcatDataset(src_tokens, None, self.dictionary, self.args)
 
         with data_utils.numpy_seed(self.args.seed):
             shuffle = np.random.permutation(len(src_tokens))
@@ -198,24 +177,13 @@ class SentencePredictionTask(LegacyFairseqTask):
             'ntokens': NumelDataset(src_tokens, reduce=True),
         }
         if self.subword_data_dictionary is not None:
-            subword_input0 = make_dataset('input0', self.subword_data_dictionary, char_ngram=False, subword=True)
-            assert input0 is not None, 'could not find dataset: {}'.format(get_path('input0', split, subword=True))
-            subword_input1 = make_dataset('input1', self.subword_data_dictionary, char_ngram=False, subword=True)
-            if self.args.init_token is not None:
-                subword_input0 = PrependTokenDataset(subword_input0, self.args.init_token)
-            if subword_input1 is None:
-                subword_src_tokens = subword_input0
-            else:
-                if self.args.separator_token is not None:
-                    subword_input1 = PrependTokenDataset(subword_input1, self.args.separator_token)
-                subword_src_tokens = ConcatSentencesDataset(subword_input0, subword_input1)
-
+            subword_src_tokens = make_dataset(self.args.src_lang, self.subword_data_dictionary, char_ngram=False, subword=True)
             subword_src_tokens = RightPadDataset(
                     subword_src_tokens,
                     pad_idx=self.subword_data_dictionary.pad(),
             )
             dataset['net_input'].update(subword_src_tokens=subword_src_tokens)
-            dataset['net_input']['src_lengths'] = NumelDataset(subword_src_tokens, reduce=False)
+            dataset['net_input'].update(bow_mask=BeginOfWord(subword_src_tokens, self.subword_data_dictionary))
 
         if self.args.add_prev_output_tokens:
             prev_tokens_dataset = RightPadDataset(
@@ -226,44 +194,21 @@ class SentencePredictionTask(LegacyFairseqTask):
                 prev_output_tokens=prev_tokens_dataset,
             )
 
-        if not self.args.regression_target:
-            label_dataset = make_dataset('label', self.label_dictionary, char_ngram=False)
-            if label_dataset is not None:
-                dataset.update(
-                    target=OffsetTokensDataset(
-                        StripTokenDataset(
-                            label_dataset,
-                            id_to_strip=self.label_dictionary.eos(),
-                        ),
-                        offset=-self.label_dictionary.nspecial,
-                    )
+        label_dataset = make_dataset('label', self.label_dictionary, char_ngram=False)
+        if label_dataset is not None:
+            dataset.update(
+                target=OffsetTokensDataset(
+                    StripTokenDataset(
+                        label_dataset,
+                        id_to_strip=self.label_dictionary.eos(),
+                    ),
+                    offset=-self.label_dictionary.nspecial,
                 )
-        else:
-            label_path = "{0}.label".format(get_path('label', split))
-            if os.path.exists(label_path):
-
-                def parse_regression_target(i, line):
-                    values = line.split()
-                    assert len(values) == self.args.num_classes, \
-                        f'expected num_classes={self.args.num_classes} regression target values on line {i}, found: "{line}"'
-                    return [float(x) for x in values]
-
-                with open(label_path) as h:
-                    dataset.update(
-                        target=RawLabelDataset([
-                            parse_regression_target(i, line.strip())
-                            for i, line in enumerate(h.readlines())
-                        ])
-                    )
-
-        if self.subword_data_dictionary is not None:
-            sizes=[subword_src_tokens.sizes]
-        else:
-            sizes=[src_tokens.sizes]
+            )
 
         nested_dataset = NestedDictionaryDataset(
             dataset,
-            sizes=sizes,
+            sizes=[src_tokens.sizes],
         )
 
         if self.args.no_shuffle:
@@ -283,12 +228,9 @@ class SentencePredictionTask(LegacyFairseqTask):
 
     def load_dataset_normal(self, split, combine=False, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
-        def get_path(type, split):
-            return os.path.join(self.args.data, type, split)
 
         def make_dataset(type, dictionary):
-            split_path = get_path(type, split)
-
+            split_path = os.path.join(self.args.data, split+".{}-{}.{}".format(self.args.src_lang, 'label', type))
             dataset = data_utils.load_indexed_dataset(
                 split_path,
                 dictionary,
@@ -296,25 +238,10 @@ class SentencePredictionTask(LegacyFairseqTask):
                 args=self.args,
                 combine=combine,
             )
+            assert dataset is not None, 'could not find dataset: {}'.format(split_path)
             return dataset
 
-        input0 = make_dataset('input0', self.source_dictionary)
-        assert input0 is not None, 'could not find dataset: {}'.format(get_path('input0', split))
-        input1 = make_dataset('input1', self.source_dictionary)
-
-        if self.args.init_token is not None:
-            input0 = PrependTokenDataset(input0, self.args.init_token)
-
-        if input1 is None:
-            src_tokens = input0
-        else:
-            if self.args.separator_token is not None:
-                input1 = PrependTokenDataset(input1, self.args.separator_token)
-
-            src_tokens = ConcatSentencesDataset(input0, input1)
-
-        with data_utils.numpy_seed(self.args.seed):
-            shuffle = np.random.permutation(len(src_tokens))
+        src_tokens = make_dataset(self.args.src_lang, self.source_dictionary)
 
         src_tokens = maybe_shorten_dataset(
             src_tokens,
@@ -325,6 +252,9 @@ class SentencePredictionTask(LegacyFairseqTask):
             self.args.seed,
         )
 
+        with data_utils.numpy_seed(self.args.seed):
+            shuffle = np.random.permutation(len(src_tokens))
+
         dataset = {
             'id': IdDataset(),
             'net_input': {
@@ -333,6 +263,8 @@ class SentencePredictionTask(LegacyFairseqTask):
                     pad_idx=self.source_dictionary.pad(),
                 ),
                 'src_lengths': NumelDataset(src_tokens, reduce=False),
+                'bow_mask': BeginOfWord(src_tokens, self.source_dictionary),
+                #'bow_mask': RightPadDataset(BeginOfWord(src_tokens, self.source_dictionary), pad_idx=0),
             },
             'nsentences': NumSamplesDataset(),
             'ntokens': NumelDataset(src_tokens, reduce=True),
@@ -347,35 +279,17 @@ class SentencePredictionTask(LegacyFairseqTask):
                 prev_output_tokens=prev_tokens_dataset,
             )
 
-        if not self.args.regression_target:
-            label_dataset = make_dataset('label', self.label_dictionary)
-            if label_dataset is not None:
-                dataset.update(
-                    target=OffsetTokensDataset(
-                        StripTokenDataset(
-                            label_dataset,
-                            id_to_strip=self.label_dictionary.eos(),
-                        ),
-                        offset=-self.label_dictionary.nspecial,
-                    )
+        label_dataset = make_dataset('label', self.label_dictionary)
+        if label_dataset is not None:
+            dataset.update(
+                target=OffsetTokensDataset(
+                    StripTokenDataset(
+                        label_dataset,
+                        id_to_strip=self.label_dictionary.eos(),
+                    ),
+                    offset=-self.label_dictionary.nspecial,
                 )
-        else:
-            label_path = "{0}.label".format(get_path('label', split))
-            if os.path.exists(label_path):
-
-                def parse_regression_target(i, line):
-                    values = line.split()
-                    assert len(values) == self.args.num_classes, \
-                        f'expected num_classes={self.args.num_classes} regression target values on line {i}, found: "{line}"'
-                    return [float(x) for x in values]
-
-                with open(label_path) as h:
-                    dataset.update(
-                        target=RawLabelDataset([
-                            parse_regression_target(i, line.strip())
-                            for i, line in enumerate(h.readlines())
-                        ])
-                    )
+            )
 
         nested_dataset = NestedDictionaryDataset(
             dataset,
@@ -448,12 +362,20 @@ class SentencePredictionTask(LegacyFairseqTask):
         model.train()
         model.set_num_updates(update_num)
         with torch.autograd.profiler.record_function("forward"):
-            loss, sample_size, logging_output = criterion(model, sample)
-        if ignore_grad:
-            loss *= 0
-        with torch.autograd.profiler.record_function("backward"):
-            optimizer.backward(loss)
-        return loss, sample_size, logging_output
+            try:
+                loss, sample_size, logging_output = criterion(model, sample)
+                if ignore_grad:
+                    loss *= 0
+                with torch.autograd.profiler.record_function("backward"):
+                    optimizer.backward(loss)
+                return loss, sample_size, logging_output
+            except:
+                print(sample['target'])
+                print(sample['net_input']['subword_src_tokens'])
+                print(sample['net_input']['bow_mask'])
+                for w in sample['net_input']['subword_src_tokens'].view(-1):
+                    print(self.dictionary[w])
+                return 0, 0, {} 
 
     def valid_step(self, sample, model, criterion):
         model.eval()

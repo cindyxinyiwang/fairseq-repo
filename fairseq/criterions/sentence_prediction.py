@@ -70,6 +70,7 @@ class SentencePredictionCriterion(FairseqCriterion):
             sample_size = targets.numel()
 
             if not self.regression_target:
+                logits = logits.view(-1, logits.size(-1))
                 lprobs = F.log_softmax(logits, dim=-1, dtype=torch.float32)
                 loss = F.nll_loss(lprobs, targets, reduction='sum')
             else:

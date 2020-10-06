@@ -33,6 +33,7 @@ class FairseqAdam(FairseqOptimizer):
             not getattr(args, 'use_old_adam', False)
             and fused_adam_cls is not None
             and torch.cuda.is_available()
+            and not args.cpu
         )
         if getattr(args, 'tpu', False):
             # on TPUs we use the Adam defined here, since it

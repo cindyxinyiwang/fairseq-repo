@@ -104,6 +104,8 @@ class RobertaModel(FairseqEncoderModel):
                             help='Path to the pretrained sde.')
         parser.add_argument('--combine-type', type=str, default='cat',
                             help='Method to combine sde and subword encoding.')
+        parser.add_argument('--sent-label', action='store_true',
+                            help='Whether to do sentence labeling task.')
 
     @classmethod
     def build_model(cls, args, task):
@@ -133,7 +135,7 @@ class RobertaModel(FairseqEncoderModel):
         #new_state_dict = prune_state_dict(state_dict, args)
         return super().load_state_dict(state_dict, strict=False)
 
-    def forward(self, src_tokens, subword_src_tokens=None, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
+    def forward(self, src_tokens, subword_src_tokens=None, bow_mask=None, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
         if classification_head_name is not None:
             features_only = True
         if subword_src_tokens is not None:
@@ -142,16 +144,22 @@ class RobertaModel(FairseqEncoderModel):
             subword_x, subword_extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
         else:
             x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
-        #x, extra = self.encoder(src_tokens, subword_src_tokens, features_only, return_all_hiddens, **kwargs)
         
         if classification_head_name is not None:
-            if subword_src_tokens is not None and self.args.combine_type == 'cat':
-                x = torch.cat([x[:,0,:].unsqueeze(1), subword_x[:,0,:].unsqueeze(1)], dim=-1)
-            x = self.classification_heads[classification_head_name](x)
-            #if subword_src_tokens is not None and self.args.combine_type == 'sim_loss':
-            #    subword_x = self.classification_heads[classification_head_name](subword_x)
-            #    x = [x, subword_x]
-            #    extra = [extra, subword_extra]
+            if self.args.sent_label:
+                bow_mask = bow_mask[0]
+                if self.args.use_sde_embed:
+                    #print(subword_x.size())
+                    x = x[:, : -1]
+                    subword_x = subword_x[:, bow_mask]
+                    if subword_src_tokens is not None and self.args.combine_type == 'cat':
+                        x = torch.cat([x, subword_x], dim=-1)
+                else:
+                    x = x[:, bow_mask]
+            else:
+                if subword_src_tokens is not None and self.args.combine_type == 'cat':
+                    x = torch.cat([x[:,0,:].unsqueeze(1), subword_x[:,0,:].unsqueeze(1)], dim=-1)
+            x = self.classification_heads[classification_head_name](x, self.args.sent_label)
         return x, extra
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):
@@ -318,8 +326,11 @@ class RobertaClassificationHead(nn.Module):
             nn.Linear(inner_dim, num_classes), q_noise, qn_block_size
         )
 
-    def forward(self, features, **kwargs):
-        x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
+    def forward(self, features, sent_label=False, **kwargs):
+        if sent_label:
+            x = features  # take <s> token (equiv. to [CLS])
+        else:
+            x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
         x = self.dropout(x)
         x = self.dense(x)
         x = self.activation_fn(x)
