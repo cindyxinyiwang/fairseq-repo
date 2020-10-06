@@ -99,6 +99,7 @@ class MaskedLMTask(LegacyFairseqTask):
             self.args.dataset_impl,
             combine=combine,
             args=self.args,
+            char_ngram=self.args.use_sde_embed,
         )
         if dataset is None:
             raise FileNotFoundError('Dataset not found: {} ({})'.format(split, split_path))
@@ -124,7 +125,10 @@ class MaskedLMTask(LegacyFairseqTask):
         logger.info('loaded {} blocks from: {}'.format(len(dataset), split_path))
 
         # prepend beginning-of-sentence token (<s>, equiv. to [CLS] in BERT)
-        dataset = PrependTokenDataset(dataset, self.source_dictionary.bos())
+        if self.args.use_sde_embed:
+            dataset = PrependTokenDataset(dataset, self.source_dictionary.bos(), pad_token=self.source_dictionary.pad())
+        else:
+            dataset = PrependTokenDataset(dataset, self.source_dictionary.bos())
 
         # create masked input and targets
         mask_whole_words = get_whole_word_mask(self.args, self.source_dictionary) \

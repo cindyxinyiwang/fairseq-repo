@@ -361,17 +361,17 @@ class RobertaEncoder(FairseqEncoder):
         )
         args.untie_weights_roberta = getattr(args, 'untie_weights_roberta', False)
 
-        if not self.args.use_sde_embed:
-          self.lm_head = RobertaLMHead(
-              embed_dim=args.encoder_embed_dim,
-              output_dim=len(dictionary),
-              activation_fn=args.activation_fn,
-              weight=(
-                  self.sentence_encoder.embed_tokens.weight
-                  if not args.untie_weights_roberta
-                  else None
-              ),
-          )
+        #if not self.args.use_sde_embed:
+        self.lm_head = RobertaLMHead(
+            embed_dim=args.encoder_embed_dim,
+            output_dim=len(dictionary),
+            activation_fn=args.activation_fn,
+            weight=(
+                self.sentence_encoder.embed_tokens.weight
+                if not args.untie_weights_roberta
+                else None
+            ),
+        )
 
     def forward(self, src_tokens, subword_src_tokens=None, features_only=False, return_all_hiddens=False, masked_tokens=None, **unused):
         """

@@ -31,6 +31,8 @@ class MaskedLmLoss(FairseqCriterion):
         3) logging outputs to display while training
         """
         masked_tokens = sample['target'].ne(self.padding_idx)
+        if len(masked_tokens.size()) == 3:
+            masked_tokens = masked_tokens[:, :, 0]
         sample_size = masked_tokens.int().sum()
 
         # Rare: when all tokens are masked, project all tokens.
@@ -48,19 +50,32 @@ class MaskedLmLoss(FairseqCriterion):
                 masked_tokens,
                 masked_tokens.new([True]),
             )
-
         logits = model(**sample['net_input'], masked_tokens=masked_tokens)[0]
         logits = logits.view(-1, logits.size(-1))
         targets = model.get_targets(sample, [logits])
         if masked_tokens is not None:
             targets = targets[masked_tokens]
-
-        loss = modules.cross_entropy(
-            logits,
-            targets.view(-1),
-            reduction='sum',
-            ignore_index=self.padding_idx,
-        )
+        if len(targets.size()) == 2:
+            loss = modules.cross_entropy(
+                logits,
+                targets[:, 0].view(-1).clone(),
+                reduction='sum',
+                ignore_index=self.padding_idx,
+            )
+            for i in range(1, 10):
+                loss = modules.cross_entropy(
+                    logits,
+                    targets[:, i].view(-1).clone(),
+                    reduction='sum',
+                    ignore_index=self.padding_idx,
+                )
+        else:
+            loss = modules.cross_entropy(
+                logits,
+                targets.view(-1),
+                reduction='sum',
+                ignore_index=self.padding_idx,
+            )
 
         logging_output = {
             'loss': loss if self.tpu else loss.data,

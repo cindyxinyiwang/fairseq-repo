@@ -137,7 +137,8 @@ def main(args):
                         lang,
                         offsets[worker_id],
                         offsets[worker_id + 1],
-                        char_ngram
+                        char_ngram,
+                        args.bpe_ngram
                     ),
                     callback=merge_result
                 )
@@ -148,7 +149,7 @@ def main(args):
         merge_result(
             Binarizer.binarize(
                 input_file, vocab, lambda t: ds.add_item(t),
-                offset=0, end=offsets[1], char_ngram=char_ngram, max_char_size=args.max_char_size,
+                offset=0, end=offsets[1], char_ngram=char_ngram, max_char_size=args.max_char_size, bpe_ngram=args.bpe_ngram
             )
         )
         if num_workers > 1:
@@ -309,7 +310,7 @@ def main(args):
                 print("{} {}".format(src_dict[k], tgt_dict[v]), file=f)
 
 
-def binarize(args, filename, vocab, output_prefix, lang, offset, end, char_ngram, append_eos=True):
+def binarize(args, filename, vocab, output_prefix, lang, offset, end, char_ngram, bpe_ngram, append_eos=True):
     ds = indexed_dataset.make_builder(dataset_dest_file(args, output_prefix, lang, "bin"),
                                       impl=args.dataset_impl, vocab_size=len(vocab))
 
@@ -317,7 +318,7 @@ def binarize(args, filename, vocab, output_prefix, lang, offset, end, char_ngram
         ds.add_item(tensor)
 
     res = Binarizer.binarize(filename, vocab, consumer, append_eos=append_eos,
-                             offset=offset, end=end, char_ngram=char_ngram, max_char_size=args.max_char_size)
+                             offset=offset, end=end, char_ngram=char_ngram, max_char_size=args.max_char_size, bpe_ngram=bpe_ngram)
     ds.finalize(dataset_dest_file(args, output_prefix, lang, "idx"))
     return res
 
