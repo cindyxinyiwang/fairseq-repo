@@ -118,6 +118,7 @@ class RobertaModel(FairseqEncoderModel):
             args.max_positions = args.tokens_per_sample
 
         encoder = RobertaEncoder(args, task.source_dictionary)
+        if not hasattr(args, 'sent_label'): args.sent_label = False
         return cls(args, encoder)
 
     def load_state_dict(self, state_dict, strict=True, args=None):
